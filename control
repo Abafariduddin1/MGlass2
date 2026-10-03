@@ -1,0 +1,9 @@
+Package: com.custom.mangaglass
+Name: MangaGlass
+Depends: mobilesubstrate
+Version: 2.0.0
+Architecture: iphoneos-arm
+Description: Glass styling and an adaptive cloud manga reader for Spotify
+Maintainer: Developer
+Author: Developer
+Section: Tweaks
