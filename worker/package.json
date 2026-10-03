@@ -1,0 +1,6 @@
+{
+  "name": "mangaglass-worker",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test worker.test.mjs" }
+}

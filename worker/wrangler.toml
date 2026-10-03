@@ -1,0 +1,8 @@
+name = "m-proxy"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+
+[vars]
+ROOT_FOLDER_ID = "1lVs_tOvclfR_FrWmB-NTXMBFg3y0wnoh"
+# Store DRIVE_API_KEY with `npx wrangler secret put DRIVE_API_KEY`.
+# Optional: ROOT_RESOURCE_KEY for a root folder link requiring a resource key.
