@@ -9,7 +9,15 @@ const file = (id, name, mimeType = 'image/jpeg') => ({ id, name, mimeType });
 
 test('natural page order and supported file routing', async () => {
   const result = await handleRequest(request(), env, async () => response({ files: [file('ten', '10.jpg'), file('two', '2.jpg'), file('pdf', 'Volume.pdf', 'application/pdf'), file('folder', 'Series', 'application/vnd.google-apps.folder'), file('other', 'note.txt', 'text/plain')] }));
-  assert.equal(result.status, 200); assert.deepEqual((await result.json()).map(x => [x.id, x.type]), [['folder','folder'], ['two','image'], ['ten','image'], ['pdf','pdf']]);
+  assert.equal(result.status, 200); assert.deepEqual((await result.json()).map(x => [x.id, x.type]), [['folder','folder'], ['two','image'], ['ten','image'], ['other','document'], ['pdf','pdf']]);
+});
+test('lists EPUB audio video and documents including octet-stream extension fallback', async () => {
+  const result=await handleRequest(request(),env,async()=>response({files:[file('book','novel.EPUB','application/octet-stream'),file('audio','song.mp3','audio/mpeg'),file('video','clip.mov','video/quicktime'),file('mp4','film.mp4','application/octet-stream'),file('doc','essay.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'),file('google','Online Google Doc','application/vnd.google-apps.document'),file('unknown','data.xyz','application/octet-stream')]}));
+  const items=await result.json(); assert.equal(items.length,5); const types=Object.fromEntries(items.map(x=>[x.id,x.type])); assert.deepEqual(types,{video:'video',doc:'document',mp4:'video',book:'epub',audio:'audio'});
+});
+test('streams a video seek range without buffering the file in the worker', async () => {
+  const result=await handleRequest(request('/api/page?fileId=video',{headers:{Range:'bytes=1048576-2097151'}}),env,async(url,options)=>{assert.equal(options.headers.get('Range'),'bytes=1048576-2097151');return new Response('segment',{status:206,headers:{'Content-Type':'video/mp4','Content-Range':'bytes 1048576-2097151/7340032','Accept-Ranges':'bytes'}});});
+  assert.equal(result.status,206); assert.equal(result.headers.get('Content-Type'),'video/mp4'); assert.equal(result.headers.get('Content-Range'),'bytes 1048576-2097151/7340032');
 });
 test('follows all Drive pages including empty intermediate pages', async () => {
   let calls = 0;

@@ -1,133 +1,115 @@
-# MangaGlass 2.0
+# MangaGlass 3.0
 
-Updated native iOS / Theos source for the Spotify tweak described in your handoff. It targets arm64 and iOS 14 or later, keeps your existing Worker URL, and includes the updated cloud proxy.
+Spotify-injected iOS source with a cloud library, an adaptive manga reader, EPUB reading, audio/video playback, document previews, and customizable appearance. Targets arm64 and iOS 14 or later. Native Liquid Glass requires iOS 26; earlier versions use UIKit materials and rounded controls.
 
-**This archive contains source, not a compiled dylib.** Page planning and the Worker have been tested locally. The UIKit / PDFKit / Logos code still needs the included macOS build and testing in your actual Spotify IPA.
+This archive contains source. Rebuild the dylib with the GitHub workflow, inject it into your Spotify IPA, and test on your phone. Local checks do not establish runtime compatibility with every Spotify build or a measured frame rate on an iPhone 13.
 
-## What changed
+## Installing this update
 
-| Requested feature | Implementation |
-| --- | --- |
-| Fit the screen | Responsive library columns, aspect-fit reader pages, and layouts based on the available viewport rather than a fixed screen size. |
-| One or two pages automatically | Portrait uses single pages. A viewport at least 600 points wide and 1.25 times wider than tall can pair consecutive single pages. Existing wide scans stay together in landscape. The first page can remain a single cover. |
-| Split wide scans | Scans with an aspect ratio of at least 1.2 split into two halves in portrait. Right-to-left mode shows the right half first. Disable the setting for landscape illustrations that should remain intact. |
-| Zoom and pan | Pinch to zoom, double-tap to zoom or reset, and pan while enlarged. Horizontal page swipes are suspended while zoomed. |
-| Reading direction | Right-to-left by default, left-to-right, and continuous vertical / webtoon mode. Two pages in an RTL spread are arranged in reading order. |
-| Bookmarks | A bookmark button, an exit prompt with save / leave / keep reading, a separate Bookmarks screen, and a Continue shortcut on the library screen. Bookmarks preserve file ID, page, split half, reading direction, and vertical offset. Original PDF view also saves the PDF destination. |
-| Fullscreen | Hide the bars and status bar. Tap the middle of a page to restore controls. |
-| Reader controls | Edge taps, page swipes, Previous / Next controls, and a tappable page counter to jump directly to a page. |
-| Display options | Pure black background, conservative white-margin cropping, grayscale, sharpening, and a lower-resolution mode. |
-| Existing PDF support | Adaptive reader uses PDFKit documents and Core Graphics page rendering. Reader options also expose the original native PDFKit view. |
-| Dock entry | A glass Manga accessory sits at the upper edge of Spotify's bottom dock. Existing Spotify tabs and selected-index logic are preserved. Recognizes native tab bars and common custom dock classes. A draggable fallback appears if no dock is recognized. |
-| Glass throughout the host app | Idempotent materials on Spotify-owned screens and navigation surfaces. Neutral backgrounds in lists and newly mounted cells become translucent. Artwork and colored surfaces keep their appearance. Native `UIGlassEffect` is used when available on iOS 26+, with dark blur materials on earlier iOS versions. |
-| Cloud library reliability | Natural numeric ordering, nested folders, mixed image / PDF / folder listings, complete pagination, image dimensions, resource keys, useful errors, retry controls, streamed downloads, and range responses. |
+1. Unzip the source archive and open its `MangaGlass` folder.
+2. Copy that folder's **contents** into your existing GitHub repository's main folder, replacing matching files. `Makefile`, `Tweak.x`, and every `.h`, `.m`, and `.c` belong at the repository root. Keep `scripts/`, `tests/`, and `worker/` in their folders. The existing workflow remains in `.github/workflows/build.yml`.
+3. In your existing Cloudflare Worker, replace its code with `worker/worker.mjs` and deploy. Keep the existing `DRIVE_API_KEY` secret and `ROOT_FOLDER_ID` variable. The new file types will not appear until the Worker is updated.
+4. Commit the repository changes and run **Actions → Build MangaGlass Dylib**. Download and unzip **MangaGlass-Dylib**.
+5. In Sideloadly, replace the old injected `MangaGlass.dylib` with this build; include the same Substrate/Substitute compatibility support used by your working IPA. Export the updated IPA and install it through your usual SideStore process. Avoid adding a second copy of the tweak.
 
-Bookmarks are explicit: opening a chapter never silently creates or updates a bookmark. Back asks before leaving unless you turn that preference off. The automatic iOS back-swipe is disabled while reading so it cannot bypass the prompt.
+Settings and bookmarks use the same preferences suite as version 2. No file migration is required. The Worker endpoint and Drive root configuration are unchanged. No API key is embedded in the source.
 
-The adaptive reader supports the image filters and split scans. **Original PDF view** preserves PDFKit's own rendering, selection, and zoom; image filters and portrait half-splitting apply in the adaptive view.
+## Supported content
 
-## Replace the old GitHub build
+| File | Reader | Limits |
+| --- | --- | --- |
+| PDF | Adaptive pages or original PDFKit view | Password-protected PDFs show an error. |
+| JPG, PNG, WebP, GIF, HEIC and other ImageIO images | Manga reader | Animated images display a still page; decoding depends on iOS. |
+| EPUB 2/3 | Local WebKit chapter reader | Unencrypted EPUBs with XHTML/HTML/SVG spine content. Scripts and remote resources are blocked. DRM content and ZIP64 are not supported. |
+| MP3, M4A, AAC, WAV, AIFF, CAF, FLAC | Apple player | Native iOS codec support applies. Files stream from Drive through the Worker. |
+| MOV, MP4, M4V and other listed video MIME types | Apple player | Container recognition does not guarantee that iOS supports the codec. Unsupported streams show a retry/error screen. |
+| TXT, RTF, CSV, DOC/DOCX, XLS/XLSX, PPT/PPTX, Pages, Numbers, Keynote | Quick Look | Preview support depends on iOS. Uploaded files are supported; Google Docs/Sheets links are not exported. |
 
-The old workflow generated and overwrote the source during every build. This version builds real source files from the repository so edits are retained.
+EPUB chapters follow the package spine rather than filename order. The chapter menu shows resource names. Reflowable books have text-size and serif/system-font choices. Fixed-layout books preserve their layout and WebKit zoom. Standard font obfuscation permits reading with the system-font fallback; no content decryption is performed.
 
-1. Unzip this archive.
-2. Copy the **contents** of the `MangaGlass` folder into the root of your existing GitHub repository. Include `.github/workflows/build.yml` and replace the previous build workflow. The Makefile should be at the repository root.
-3. Remove any other old workflow that regenerates MangaGlass source. Keep one build workflow.
-4. Commit the files to `main` / `master`, or open **Actions → Build MangaGlass Dylib → Run workflow**.
-5. When the macOS build succeeds, download **MangaGlass-Dylib**, unzip it, and use `MangaGlass.dylib`.
+EPUB extraction runs off the UI thread, validates paths and checksums, and reads one file at a time. Limits: 4,096 entries, 32 MiB per extracted file, and 256 MiB total. Temporary extracted files are removed when their reader is released. Only the original book download is kept in the existing bounded cache.
 
-The workflow installs Theos, selects the runner's Xcode iOS SDK, runs the portable tests, builds arm64, and checks the Mach-O file before exporting it. It selects the actual dylib from explicit paths; it cannot accidentally select the debug-symbol file that caused the earlier launch crash.
+Save EPUB bookmarks with the bookmark button or exit prompt. They restore chapter and scroll fraction. Media bookmarks restore playback time; document bookmarks reopen the file, without a page-position guarantee. **Bookmarks → tap** and the library's **Continue** shortcut support the new types.
 
-For a Mac with Xcode and Theos installed:
+Media begins with your play tap. Pause Spotify before starting your own audio if it is already playing: this tweak does not hook Spotify's playback engine or replace its remote-command handlers. Media streaming is not an offline-download feature.
 
-```bash
-export THEOS="/path/to/theos"
-bash scripts/test.sh
-make FINALPACKAGE=1
-bash scripts/export-dylib.sh
+## Glass and appearance
+
+Open **Manga → settings → Spotify and Manga appearance**.
+
+- Five presets: Spotify, Midnight, Ocean, Rose, and Pearl; plus a Custom palette.
+- Custom accent, background, and text colors accept six-digit hex values.
+- Regular or Clear native glass, a glass-buttons toggle, and corner-shape choices.
+- Optional matching of neutral Spotify text to the theme. Artwork and existing colored content keep their colors.
+- Copy/paste appearance themes as JSON. Imports accept appearance preferences only.
+
+Example:
+
+```json
+{"theme":"ocean","glass":true,"glassStyle":"regular","glassButtons":true,"hostText":true,"roundness":"20"}
 ```
 
-## Sideloadly
+Glass is applied to foreground controls and panels. Standard navigation bars, tab bars, and toolbars use UIKit's appearance API; buttons use native `UIButtonConfiguration` glass factories on iOS 26. This avoids placing a blur view over live buttons. Content backgrounds, library cards, labels, and scrolling lists share the palette and materials without a separate effect on each recycled row. PDFs, artwork, videos, and book pages retain their content.
 
-Use the injection / **Export IPA** process from your handoff:
+Spotify's private/custom surfaces vary by version. The bounded adapter covers recognized Spotify screens, UIKit bars, visible foreground buttons, and neutral list/text surfaces; it cannot promise that every custom-rendered component adopts native glass. This is appearance customization, not desktop Spicetify's CSS/plugin runtime.
 
-1. Open your Spotify IPA and add the newly built `MangaGlass.dylib` in advanced injection settings.
-2. Include the Cydia Substrate / Substitute compatibility support needed for Logos hooks.
-3. Keep automatic bundle-ID changes and app renaming disabled, as described in your existing working process.
-4. Export the modified IPA, then sign / install it using your existing working SideStore process.
+Reduce Transparency disables glass materials. The theme remains available with solid backgrounds. On older iOS releases the fallback is an approximation, not the native iOS 26 Liquid Glass renderer.
 
-The archive does not include Spotify, an IPA, a signing identity, or a compiled dylib. Existing preferences and bookmarks live inside the installed Spotify app's container; deleting the app can remove them.
+## Manga beside Create
 
-## Cloudflare Worker
+The default **Manga entry → Beside Create** option identifies a visible Create tab and places Manga in the same dock row. It redistributes the existing tab views with reversible transforms, keeping Spotify's item order, delegate, and existing tap actions. The Manga action opens the reader navigation rather than adding an unknown controller to Spotify's private navigation model.
 
-The reader still uses `https://m-proxy.19lueleaf.workers.dev` in `MGConfig.h`. The upgraded Worker keeps `/api/library` and `/api/page`, so existing callers remain compatible.
+The adapter needs an identifiable Create label/accessibility identifier and enough room for the row. Private/custom dock hierarchies or localized labels may prevent detection. In that case a draggable fallback appears; turn it off with **Show fallback if dock unavailable**. **Floating button** remains an explicit placement choice. Rotation, screen changes, and standard tab-bar layout trigger coalesced refreshes.
 
-### Cloudflare dashboard
+## UI fixes in this update
 
-1. Open your existing `m-proxy` Worker and replace its code with `worker/worker.mjs`.
-2. Add a **secret** named `DRIVE_API_KEY` containing your Google Drive API key.
-3. Add `ROOT_FOLDER_ID` with the root folder ID already set in `worker/wrangler.toml`.
-4. If the root folder's shared link includes a required resource key, set `ROOT_RESOURCE_KEY` too.
-5. Deploy that Worker. Your Drive API must be enabled, and the folders / manga files must have the public sharing required by the API-key-based setup in your handoff.
+- Bar materials no longer sit over buttons; normal, compact, and scroll-edge appearances share explicit foreground colors.
+- Manga's opener stays hidden even when a reader presents another dialog.
+- Reusing a zoomed manga cell restores page-swiping state.
+- A page turn that does not move no longer waits indefinitely for a scrolling-animation callback.
+- Folder requests reject stale callbacks after refresh or another request.
+- Initial/very narrow collection widths produce valid cell sizes.
+- Continue and bookmark labels distinguish pages, EPUB chapters, and playback time.
+- EPUB link anchors keep their destination instead of always resetting to the chapter top.
+- Themed counters, settings, and document titles remain legible and use the original file name.
 
-The API key from the PDF is intentionally excluded from these source files. The new Worker reads it from its environment. Adding the secret is required when deploying this new Worker; a missing configuration returns a visible error instead of an empty screen.
+## Performance choices
 
-### Wrangler
+The defaults retain normal reader quality. The optional lower-memory reader mode remains available.
 
-From `worker/`, in an environment with your Cloudflare account configured:
+- No global view-layout hook, display-link polling, or continuous screen traversal. The standard tab-bar hook only queues one refresh and skips unchanged tab transforms.
+- Theme passes are bounded and happen on mount/settings changes. Theme colors are cached.
+- Foreground native button materials have a per-controller budget; recycled cells do not receive their own live effects. Rows continue to use the same palette.
+- Reader rendering is serial, with request cancellation, one-group prefetch, and an 18/48 MiB decoded-image cache. Long strips have a separate bounded pixel budget.
+- EPUBs display one chapter at a time in a nonpersistent WebKit session. Video/audio streams use byte ranges rather than downloading an entire movie first.
 
-```bash
-npx wrangler secret put DRIVE_API_KEY
-npx wrangler deploy
-```
+These choices reduce CPU/GPU and memory work, but smoothness, temperature, battery use, and appearance on an iPhone 13 need device profiling in the actual IPA. Use the device checks below before relying on the build.
 
-Requests:
+## Offline listening — explanation only
 
-```text
-GET /api/library
-GET /api/library?folderId=DRIVE_FOLDER_ID
-GET /api/page?fileId=DRIVE_FILE_ID
-```
+For Spotify catalogue music, the supported route is Premium: download a playlist/album while online, then use **Settings and privacy → Data-saving and offline → Offline mode**. Spotify requires going online at least once every 30 days to retain downloads. Cosmetic client changes do not grant account download authorization; adding more UI hooks is not a dependable replacement for that.
 
-Folders remain arrays of `{ id, name, type }`, optionally including `width`, `height`, and `resourceKey`. All-image chapter folders open the reader directly. Mixed folders show all supported items, and selecting an image opens the image subset. Empty folders show an empty-state message.
+For audio files you own, offline playback is feasible as a separate feature: save the complete file in the app's documents directory, maintain a local download/index queue, and use `AVPlayer` with the local file URL. Background transfers and storage controls would be needed for a polished implementation. That would play your files, not unlock Spotify catalogue downloads. **Offline song downloads have not been implemented in this update.**
 
-## Performance and freeze prevention
+## Validation
 
-- No global `layoutSubviews` hooks and no repeated reordering of the view hierarchy.
-- One material per tracked screen / bar / dock accessory. Cells receive a lightweight color update rather than individual blur views.
-- Viewport changes are handled by the reader, with a size guard and deferred layout planning. Dimension discovery waits for page dragging / zooming to finish before rebuilding the layout.
-- Downloads go to disk. PDF loading, image downsampling, cropping, filtering, and page rendering happen outside the main thread.
-- Serial rendering, one next-group prefetch, cancellation on cell reuse, and generation checks prevent old downloads from replacing new pages.
-- Standard page limit: 3,072 pixels, or 1,536 in lower-resolution mode. Long strips use a separate bounded pixel budget to retain useful text detail.
-- Rendered cache target: 48 MiB normally or 18 MiB in lower-resolution mode. The cache is cleared on memory warnings. These are cache budgets, not a guarantee of total process memory.
-- Downloaded-file cache trims older files around 256 MiB; a current large volume can exceed that target. Cached files expire after 24 hours.
-- Glass can be disabled in MangaGlass Settings and follows iOS Reduce Transparency.
+`bash scripts/test.sh` passes locally:
 
-## Ideas not included
+- 26 reader-geometry checks and 5,000 randomized layouts.
+- 19 production ZIP-extractor checks, including unsafe paths, CRC errors, truncated containers, unsupported encryption/compression, duplicate paths, and 1,000 mutated archives.
+- 26 mocked Worker tests, including EPUB/document classification and media seek ranges.
 
-- Face ID / Touch ID lock: requires permission handling in the signed host IPA and verification on the target device.
-- Volume-button page turns: this version uses tap zones, swipes, and reader controls, preserving Spotify's audio controls.
-- A separate custom Metal renderer: UIKit handles compositing / zoom, Core Graphics renders PDF pages, and Core Image handles optional filters.
-- Automatic Read / In Progress labels: bookmarks follow your requested explicit-save behavior instead.
+All production native sources, including the actual Logos-generated hooks, compile for arm64/iOS 14 with `-Wall -Wextra -Werror` against an iOS SDK. A cross-link check resolves the UIKit/WebKit/AVKit/Quick Look/CoreMedia/zlib dependencies. This is not a signed/device-tested distribution binary.
 
-## Validation and remaining device checks
+On macOS the test script additionally runs the production EPUB package parser against generated fixtures, checking spine order, title metadata, fixed layout/RTL, resource paths, missing chapters, and encrypted content. Those native runtime tests run in GitHub CI; they cannot run in this Linux workspace. Drive calls in local Worker tests are mocked; the deployed Worker/account have not been exercised here.
 
-`bash scripts/test.sh` passed locally: **26 reader-geometry checks**, **5,000 randomized layouts**, and **24 mocked Worker tests**. Workflow YAML, the tweak filter, shell syntax, and absence of embedded API keys were also checked.
+## Device checks
 
-The local environment has no Apple SDK, Theos, or iOS device. **The native code has not been compiled or run here.** The macOS workflow is the next compilation check. The Worker tests use mocked Drive responses; they do not verify your deployed Worker or account configuration.
+1. Home, Search, Your Library, Now Playing, Create, and Manga still respond. Confirm that the Manga entry does not overlap another tab's tap target.
+2. Open a PDF, image chapter, EPUB, MP3, MOV/MP4, and a document; try a mixed folder, a missing file, and an unsupported codec.
+3. Bookmark an EPUB halfway through a chapter and media halfway through playback. Resume through Continue and Bookmarks.
+4. Rotate manga on a spread, zoom/pan, reuse cells by swiping rapidly, try vertical reading, and switch to original PDF view.
+5. Try all presets, custom colors, theme copy/paste, Regular/Clear glass, Reduce Transparency, and glass off. Controls should remain visible.
+6. Repeat navigation and content opening while watching memory and frame pacing on the oldest target phone. Check accessibility text sizes and VoiceOver.
 
-After building, check on the actual phone:
-
-- Spotify launches and remains responsive on Home, Search, Your Library, and Now Playing.
-- Dock Manga button opens once; existing tabs still work. If your Spotify build uses a different private dock class, the floating fallback should appear.
-- Open a PDF, an image chapter, an empty folder, and a mixed folder.
-- Rotate on a single page and on a wide scan. Confirm page / half, RTL ordering, and fit are preserved.
-- Pinch, pan, double-tap, and swipe rapidly. Pages should retain the correct artwork.
-- Try vertical mode with a long strip and resume a bookmark midway through it.
-- Save / cancel / leave from the bookmark prompt; reopen from Bookmarks and Continue.
-- Switch to original PDF view and resume a bookmark there.
-- Toggle glass and Reduce Transparency without accumulating layers or freezing.
-
-Spotify's private view classes and supported orientations can differ between IPA versions. Some custom surfaces may keep their original appearance, and landscape requires the host IPA to permit that orientation. A genuine whole-app appearance and on-device stability remain runtime checks.
-
-Implementation references: [Theos variables](https://theos.dev/docs/variables), [Theos on macOS](https://theos.dev/docs/installation-macos), [Apple UIGlassEffect](https://developer.apple.com/documentation/uikit/uiglasseffect), and [Google Drive files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list).
+References: [Apple glass button configurations](https://developer.apple.com/documentation/uikit/uibuttonconfiguration/glassbuttonconfiguration), [WebKit file access](https://developer.apple.com/documentation/webkit/wkwebview/loadfileurl(_:allowingreadaccessto:)), [EPUB specification](https://www.w3.org/TR/epub-33/), [Spotify offline help](https://support.spotify.com/ie/article/listen-offline/), [Theos](https://theos.dev/docs/).

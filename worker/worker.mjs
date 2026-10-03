@@ -11,7 +11,25 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), {
   status, headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': status === 200 ? 'public, max-age=60' : 'no-store' },
 });
 const fail = (message, status) => json({ error: { message } }, status);
-const typeOf = mime => mime === 'application/vnd.google-apps.folder' ? 'folder' : mime === 'application/pdf' ? 'pdf' : mime?.startsWith('image/') ? 'image' : 'unknown';
+const extensions = {
+  pdf: 'pdf', epub: 'epub',
+  jpg: 'image', jpeg: 'image', png: 'image', webp: 'image', gif: 'image', heic: 'image', avif: 'image', tiff: 'image', bmp: 'image',
+  mp3: 'audio', m4a: 'audio', aac: 'audio', wav: 'audio', aiff: 'audio', caf: 'audio', flac: 'audio',
+  mp4: 'video', mov: 'video', m4v: 'video',
+  txt: 'document', rtf: 'document', doc: 'document', docx: 'document', ppt: 'document', pptx: 'document', xls: 'document', xlsx: 'document', csv: 'document', pages: 'document', numbers: 'document', key: 'document',
+};
+const typeOf = (mime, name) => {
+  if (mime === 'application/vnd.google-apps.folder') return 'folder';
+  if (mime?.startsWith('application/vnd.google-apps.')) return 'unknown';
+  const extension = typeof name === 'string' ? name.split('.').at(-1).toLowerCase() : '';
+  // An explicit EPUB extension also covers Drive uploads labelled ZIP/octet-stream.
+  if (mime === 'application/epub+zip' || extension === 'epub') return 'epub';
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime?.startsWith('image/')) return 'image';
+  if (mime?.startsWith('audio/')) return 'audio';
+  if (mime?.startsWith('video/')) return 'video';
+  return extensions[extension] || (['text/plain', 'text/csv', 'application/rtf'].includes(mime) ? 'document' : 'unknown');
+};
 
 function resourceHeaders(env, fileId, resourceKey) {
   const key = resourceKey || (fileId === env.ROOT_FOLDER_ID ? env.ROOT_RESOURCE_KEY : null);
@@ -39,7 +57,7 @@ async function library(url, env, upstream) {
     try { body = await response.json(); } catch { return fail('Drive returned invalid library data.', 502); }
     if (!Array.isArray(body.files) || body.incompleteSearch) return fail('Drive returned an incomplete library listing.', 502);
     for (const file of body.files) {
-      const type = typeOf(file.mimeType);
+      const type = typeOf(file.mimeType, file.name);
       if (type === 'unknown' || !ID.test(file.id || '')) continue;
       const item = { id: file.id, name: typeof file.name === 'string' ? file.name : 'Untitled', type };
       if (ID.test(file.resourceKey || '')) item.resourceKey = file.resourceKey;

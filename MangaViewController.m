@@ -3,6 +3,7 @@
 #import "MGGlass.h"
 #import "MGPageProvider.h"
 #import "MGSettings.h"
+#import "MGFileViewController.h"
 #import <objc/runtime.h>
 #include <math.h>
 #include <stdlib.h>
@@ -21,6 +22,13 @@ static NSArray<NSDictionary *> *MGImages(NSArray<NSDictionary *> *items) {
 }
 static void MGOpenBookmark(UIViewController *controller, NSDictionary *bookmark) {
     if (!bookmark) return;
+    if ([@[@"epub", @"audio", @"video", @"document"] containsObject:bookmark[@"type"]]) {
+        MGFileViewController *reader = [MGFileViewController new];
+        NSMutableDictionary *item = [@{@"id":bookmark[@"fileId"] ?: @"", @"type":bookmark[@"type"], @"name":bookmark[@"name"] ?: bookmark[@"title"] ?: @"File"} mutableCopy];
+        if (bookmark[@"resourceKey"]) item[@"resourceKey"] = bookmark[@"resourceKey"];
+        reader.fileItem = item; reader.initialBookmark = bookmark;
+        [controller.navigationController pushViewController:reader animated:YES]; return;
+    }
     if ([bookmark[@"type"] isEqualToString:@"pdf"]) {
         MangaPDFViewController *reader = [MangaPDFViewController new];
         reader.pdfFileId = bookmark[@"fileId"];
@@ -48,43 +56,11 @@ static void MGOpenBookmark(UIViewController *controller, NSDictionary *bookmark)
 
 @implementation MGNavigationController
 - (void)viewDidLoad {
-    [super viewDidLoad];
-    // Do not inherit Spotify's UIAppearance settings for manga controls.
-    UIColor *accent = [UIColor colorWithRed:30.0 / 255 green:215.0 / 255 blue:96.0 / 255 alpha:1];
-    UIBarButtonItemAppearance *buttons = [[UIBarButtonItemAppearance alloc] initWithStyle:UIBarButtonItemStylePlain];
-    buttons.normal.titleTextAttributes = @{NSForegroundColorAttributeName:accent};
-    buttons.highlighted.titleTextAttributes = @{NSForegroundColorAttributeName:accent};
-    buttons.disabled.titleTextAttributes = @{NSForegroundColorAttributeName:[UIColor secondaryLabelColor]};
-    UINavigationBarAppearance *navigation = [UINavigationBarAppearance new];
-    [navigation configureWithOpaqueBackground];
-    navigation.backgroundColor = [UIColor colorWithWhite:.06 alpha:1];
-    navigation.titleTextAttributes = @{NSForegroundColorAttributeName:[UIColor whiteColor]};
-    navigation.largeTitleTextAttributes = navigation.titleTextAttributes;
-    navigation.buttonAppearance = buttons;
-    navigation.doneButtonAppearance = buttons;
-    navigation.backButtonAppearance = buttons;
-    self.navigationBar.standardAppearance = navigation;
-    self.navigationBar.compactAppearance = navigation;
-    self.navigationBar.scrollEdgeAppearance = navigation;
-    self.navigationBar.tintColor = accent;
-    self.navigationBar.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
-    self.navigationBar.translucent = NO;
-    UIToolbarAppearance *toolbar = [UIToolbarAppearance new];
-    [toolbar configureWithOpaqueBackground];
-    toolbar.backgroundColor = navigation.backgroundColor;
-    toolbar.buttonAppearance = buttons;
-    toolbar.doneButtonAppearance = buttons;
-    self.toolbar.standardAppearance = toolbar;
-    self.toolbar.compactAppearance = toolbar;
-    self.toolbar.tintColor = accent;
-    self.toolbar.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
-    self.toolbar.translucent = NO;
-    if (@available(iOS 15.0, *)) {
-        self.navigationBar.compactScrollEdgeAppearance = navigation;
-        self.toolbar.scrollEdgeAppearance = toolbar;
-        self.toolbar.compactScrollEdgeAppearance = toolbar;
-    }
+    [super viewDidLoad]; MGConfigureNavigationAppearance(self);
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appearanceChanged:) name:MGSettingsDidChangeNotification object:nil];
 }
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
+- (void)appearanceChanged:(NSNotification *)notification { if (MGIsAppearancePreference(notification.userInfo[@"key"])) MGConfigureNavigationAppearance(self); }
 - (UIViewController *)childViewControllerForStatusBarHidden { return self.topViewController; }
 - (UIViewController *)childViewControllerForStatusBarStyle { return self.topViewController; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.topViewController.supportedInterfaceOrientations; }
@@ -101,7 +77,6 @@ void MGPresentLibrary(UIWindow *window) {
     MangaLibraryViewController *library = [MangaLibraryViewController new];
     MGNavigationController *nav = [[MGNavigationController alloc] initWithRootViewController:library];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     objc_setAssociatedObject(nav, &MGReaderNavigationKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [top presentViewController:nav animated:YES completion:nil];
 }
@@ -113,12 +88,12 @@ void MGPresentLibrary(UIWindow *window) {
 @implementation MGLibraryCell
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
-        self.backgroundColor = [UIColor colorWithWhite:.17 alpha:.65];
-        self.layer.cornerRadius = 18;
+        self.backgroundColor = MGSurfaceColor();
+        self.layer.cornerRadius = [[MGSettings shared] number:@"roundness"];
         self.layer.borderWidth = .5;
         self.layer.borderColor = [UIColor colorWithWhite:1 alpha:.18].CGColor;
-        self.icon = [UIImageView new]; self.icon.tintColor = [UIColor whiteColor]; self.icon.contentMode = UIViewContentModeScaleAspectFit;
-        self.nameLabel = [UILabel new]; self.nameLabel.textColor = [UIColor whiteColor]; self.nameLabel.numberOfLines = 3;
+        self.icon = [UIImageView new]; self.icon.tintColor = MGAccentColor(); self.icon.contentMode = UIViewContentModeScaleAspectFit;
+        self.nameLabel = [UILabel new]; self.nameLabel.textColor = MGTextColor(); self.nameLabel.numberOfLines = 3;
         self.nameLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline]; self.nameLabel.adjustsFontForContentSizeCategory = YES;
         self.nameLabel.textAlignment = NSTextAlignmentCenter;
         self.icon.translatesAutoresizingMaskIntoConstraints = NO; self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -151,7 +126,7 @@ void MGPresentLibrary(UIWindow *window) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     if (!self.title) self.title = @"Manga Library";
-    self.view.backgroundColor = [UIColor colorWithWhite:.05 alpha:1];
+    self.view.backgroundColor = MGBackgroundColor();
     MGInstallGlass(self.view);
     if (self == self.navigationController.viewControllers.firstObject) self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeLibrary)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"slider.horizontal.3"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
@@ -172,8 +147,9 @@ void MGPresentLibrary(UIWindow *window) {
     UIView *background = [UIView new];
     UIStackView *stack = [UIStackView new]; stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 16; stack.alignment = UIStackViewAlignmentCenter; stack.translatesAutoresizingMaskIntoConstraints = NO;
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-    _status = [UILabel new]; _status.textColor = [UIColor secondaryLabelColor]; _status.numberOfLines = 0; _status.textAlignment = NSTextAlignmentCenter;
+    _status = [UILabel new]; _status.textColor = [MGTextColor() colorWithAlphaComponent:.75]; _status.numberOfLines = 0; _status.textAlignment = NSTextAlignmentCenter;
     _retry = [UIButton buttonWithType:UIButtonTypeSystem]; [_retry setTitle:@"Retry" forState:UIControlStateNormal]; [_retry addTarget:self action:@selector(fetchLibrary) forControlEvents:UIControlEventTouchUpInside];
+    MGStyleButton(_retry);
     [stack addArrangedSubview:_spinner]; [stack addArrangedSubview:_status]; [stack addArrangedSubview:_retry]; [background addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[[stack.centerXAnchor constraintEqualToAnchor:background.centerXAnchor], [stack.centerYAnchor constraintEqualToAnchor:background.centerYAnchor], [stack.widthAnchor constraintLessThanOrEqualToAnchor:background.widthAnchor multiplier:.82]]];
     _collectionView.backgroundView = background;
@@ -193,7 +169,7 @@ void MGPresentLibrary(UIWindow *window) {
         [_collectionView.collectionViewLayout invalidateLayout];
     }
 }
-- (void)settingsChanged:(NSNotification *)notification { (void)notification; MGInstallGlass(self.view); }
+- (void)settingsChanged:(NSNotification *)notification { if (!MGIsAppearancePreference(notification.userInfo[@"key"])) return; MGInstallGlass(self.view); _status.textColor = [MGTextColor() colorWithAlphaComponent:.75]; MGStyleButton(_retry); [_collectionView reloadData]; }
 - (void)bookmarksChanged:(NSNotification *)notification { (void)notification; [_collectionView reloadData]; }
 - (void)closeLibrary { [self dismissViewControllerAnimated:YES completion:nil]; }
 - (void)settings { [self.navigationController pushViewController:[[MGSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES]; }
@@ -201,7 +177,7 @@ void MGPresentLibrary(UIWindow *window) {
 - (void)resumeBookmark { MGOpenBookmark(self, [MGBookmarkStore all].firstObject); }
 - (void)showItems { [_spinner stopAnimating]; _status.text = self.items.count ? @"" : @"This folder is empty."; _retry.hidden = YES; [_refresh endRefreshing]; [_collectionView reloadData]; }
 - (void)fetchLibrary {
-    [_task cancel]; NSUInteger generation = ++_generation;
+    [_task cancel]; _opening = NO; NSUInteger generation = ++_generation;
     [_spinner startAnimating]; _status.text = self.items.count ? @"" : @"Loading library…"; _retry.hidden = YES;
     __weak typeof(self) weakSelf = self;
     _task = [[MGCloudClient shared] listFolder:self.folderId resourceKey:self.resourceKey completion:^(NSArray *items, NSError *error) {
@@ -215,7 +191,7 @@ void MGPresentLibrary(UIWindow *window) {
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section { (void)collectionView; (void)section; return self.items.count; }
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)path {
-    (void)layout; (void)path; CGFloat available = collectionView.bounds.size.width - 32;
+    (void)layout; (void)path; CGFloat available = MAX(1, collectionView.bounds.size.width - 32);
     NSInteger columns = MAX(1, (NSInteger)floor((available + 12) / 152));
     return CGSizeMake(floor((available - 12 * (columns - 1)) / columns), 202);
 }
@@ -227,14 +203,18 @@ void MGPresentLibrary(UIWindow *window) {
     UIButton *button = (UIButton *)[header viewWithTag:501];
     if (!button) { button = [UIButton buttonWithType:UIButtonTypeSystem]; button.tag = 501; button.frame = CGRectInset(header.bounds, 16, 8); button.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; [button addTarget:self action:@selector(resumeBookmark) forControlEvents:UIControlEventTouchUpInside]; [header addSubview:button]; }
     NSDictionary *bookmark = [MGBookmarkStore all].firstObject;
-    [button setTitle:[NSString stringWithFormat:@"Continue: %@ · page %lu", bookmark[@"title"] ?: @"Bookmark", (unsigned long)[bookmark[@"page"] unsignedIntegerValue] + 1] forState:UIControlStateNormal];
+    NSString *type = bookmark[@"type"];
+    NSString *suffix = [type isEqualToString:@"epub"] ? [NSString stringWithFormat:@" · chapter %lu", (unsigned long)[bookmark[@"chapter"] unsignedIntegerValue] + 1] : [@[@"images", @"pdf"] containsObject:type] ? [NSString stringWithFormat:@" · page %lu", (unsigned long)[bookmark[@"page"] unsignedIntegerValue] + 1] : @"";
+    [button setTitle:[NSString stringWithFormat:@"Continue: %@%@", bookmark[@"title"] ?: @"Bookmark", suffix] forState:UIControlStateNormal];
+    MGStyleButton(button);
     button.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     return header;
 }
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)path {
     MGLibraryCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Library" forIndexPath:path];
     NSDictionary *item = self.items[path.item]; cell.nameLabel.text = item[@"name"];
-    NSString *symbol = [item[@"type"] isEqualToString:@"folder"] ? @"folder" : [item[@"type"] isEqualToString:@"pdf"] ? @"doc.richtext" : @"photo";
+    NSString *symbol = @{@"folder":@"folder", @"pdf":@"doc.richtext", @"epub":@"book.closed", @"audio":@"waveform", @"video":@"play.rectangle", @"document":@"doc.text", @"image":@"photo"}[item[@"type"]] ?: @"doc";
+    cell.nameLabel.textColor = MGTextColor(); cell.icon.tintColor = MGAccentColor(); cell.backgroundColor = MGSurfaceColor(); cell.layer.cornerRadius = [[MGSettings shared] number:@"roundness"];
     cell.icon.image = [UIImage systemImageNamed:symbol]; cell.accessibilityLabel = [NSString stringWithFormat:@"%@, %@", item[@"name"], item[@"type"]];
     return cell;
 }
@@ -244,13 +224,15 @@ void MGPresentLibrary(UIWindow *window) {
     if ([type isEqualToString:@"pdf"]) {
         MangaPDFViewController *reader = [MangaPDFViewController new]; reader.pdfFileId = item[@"id"]; reader.resourceKey = item[@"resourceKey"]; reader.title = item[@"name"];
         [self.navigationController pushViewController:reader animated:YES];
+    } else if ([@[@"epub", @"audio", @"video", @"document"] containsObject:type]) {
+        MGFileViewController *reader = [MGFileViewController new]; reader.fileItem = item; [self.navigationController pushViewController:reader animated:YES];
     } else if ([type isEqualToString:@"image"]) {
         MangaReaderViewController *reader = [MangaReaderViewController new]; reader.pages = MGImages(self.items); reader.folderId = self.folderId; reader.resourceKey = self.resourceKey; reader.title = self.title;
         reader.initialBookmark = @{@"pageFileId":item[@"id"]}; [self.navigationController pushViewController:reader animated:YES];
     } else {
-        _opening = YES; __weak typeof(self) weakSelf = self;
+        _opening = YES; NSUInteger generation = ++_generation; __weak typeof(self) weakSelf = self;
         _task = [[MGCloudClient shared] listFolder:item[@"id"] resourceKey:item[@"resourceKey"] completion:^(NSArray *contents, NSError *error) {
-            typeof(self) owner = weakSelf; if (!owner) return; owner->_opening = NO;
+            typeof(self) owner = weakSelf; if (!owner || owner->_generation != generation) return; owner->_opening = NO;
             if (owner.navigationController.topViewController != owner) return;
             if (error) { MGAlert(owner, @"Folder unavailable", error.localizedDescription); return; }
             NSArray *images = MGImages(contents);
@@ -284,6 +266,10 @@ void MGPresentLibrary(UIWindow *window) {
     (void)tableView; UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
     NSDictionary *bookmark = _bookmarks[path.row]; cell.textLabel.text = bookmark[@"title"] ?: @"Untitled"; cell.textLabel.textColor = [UIColor whiteColor];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"Page %lu%@", (unsigned long)[bookmark[@"page"] unsignedIntegerValue] + 1, [bookmark[@"half"] integerValue] == MGLeftHalf ? @" · left half" : [bookmark[@"half"] integerValue] == MGRightHalf ? @" · right half" : @""];
+    if ([bookmark[@"type"] isEqualToString:@"epub"]) cell.detailTextLabel.text = [NSString stringWithFormat:@"Chapter %lu", (unsigned long)[bookmark[@"chapter"] unsignedIntegerValue] + 1];
+    if ([@[@"audio", @"video"] containsObject:bookmark[@"type"]]) { NSUInteger seconds = (NSUInteger)MAX(0, [bookmark[@"position"] doubleValue]); cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu:%02lu", (unsigned long)seconds / 60, (unsigned long)seconds % 60]; }
+    if ([bookmark[@"type"] isEqualToString:@"document"]) cell.detailTextLabel.text = @"Document";
+    cell.textLabel.textColor = MGTextColor(); cell.detailTextLabel.textColor = [MGTextColor() colorWithAlphaComponent:.65]; cell.backgroundColor = MGSurfaceColor();
     cell.backgroundColor = [UIColor colorWithWhite:.15 alpha:.65]; cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path { [tableView deselectRowAtIndexPath:path animated:YES]; MGOpenBookmark(self, _bookmarks[path.row]); }
@@ -329,8 +315,9 @@ void MGPresentLibrary(UIWindow *window) {
 - (void)dealloc { [self cancelRequests]; }
 - (void)cancelRequests { for (MGPageRequest *request in _requests) [request cancel]; [_requests removeAllObjects]; ++_generation; }
 - (void)prepareForReuse {
-    [super prepareForReuse]; [self cancelRequests]; self.tapped = nil; self.zoomChanged = nil; self.retryAction = nil;
-    [self.zoom setZoomScale:1 animated:NO]; for (UIImageView *view in self.images) view.image = nil;
+    [super prepareForReuse]; [self cancelRequests];
+    [self.zoom setZoomScale:1 animated:NO]; if (self.zoomChanged) self.zoomChanged(NO);
+    self.tapped = nil; self.zoomChanged = nil; self.retryAction = nil; for (UIImageView *view in self.images) view.image = nil;
 }
 - (void)layoutSubviews {
     [super layoutSubviews]; CGSize size = self.contentView.bounds.size;
@@ -421,7 +408,7 @@ void MGPresentLibrary(UIWindow *window) {
     [stack addArrangedSubview:_spinner]; [stack addArrangedSubview:_message]; [stack addArrangedSubview:_retry]; [status addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[[stack.centerXAnchor constraintEqualToAnchor:status.centerXAnchor], [stack.centerYAnchor constraintEqualToAnchor:status.centerYAnchor], [stack.widthAnchor constraintLessThanOrEqualToAnchor:status.widthAnchor multiplier:.8]]];
     _collectionView.backgroundView = status;
-    _counter = [UILabel new]; _counter.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium]; _counter.textColor = [UIColor whiteColor];
+    _counter = [UILabel new]; _counter.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium]; _counter.textColor = MGTextColor();
     _counter.userInteractionEnabled = YES; [_counter addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(jumpToPage)]]; _counter.accessibilityLabel = @"Page counter. Tap to jump to a page.";
     UIBarButtonItem *prev = [[UIBarButtonItem alloc] initWithTitle:@"Previous" style:UIBarButtonItemStylePlain target:self action:@selector(previousPage)];
     UIBarButtonItem *next = [[UIBarButtonItem alloc] initWithTitle:@"Next" style:UIBarButtonItemStylePlain target:self action:@selector(nextPage)];
@@ -596,8 +583,8 @@ void MGPresentLibrary(UIWindow *window) {
 }
 - (void)scrollToCurrent:(BOOL)animated {
     if (!_plan.groupCount) return;
-    _turning = animated;
     NSUInteger display = MGDisplayIndex(_currentGroup, _plan.groupCount, _direction);
+    _turning = animated;
     NSIndexPath *path = [NSIndexPath indexPathForItem:display inSection:0];
     if (_direction == MGVertical) {
         CGRect frame = [_collectionView.collectionViewLayout layoutAttributesForItemAtIndexPath:path].frame;
@@ -605,7 +592,11 @@ void MGPresentLibrary(UIWindow *window) {
         y = MIN(y, MAX(0, _collectionView.contentSize.height + _collectionView.contentInset.bottom - _collectionView.bounds.size.height));
         if (fabs(y - _collectionView.contentOffset.y) < .5) _turning = NO;
         [_collectionView setContentOffset:CGPointMake(0, MAX(0, y)) animated:animated];
-    } else [_collectionView scrollToItemAtIndexPath:path atScrollPosition:UICollectionViewScrollPositionCenteredHorizontally animated:animated];
+    } else {
+        CGFloat target = display * _collectionView.bounds.size.width;
+        if (fabs(target - _collectionView.contentOffset.x) < .5) _turning = NO;
+        [_collectionView scrollToItemAtIndexPath:path atScrollPosition:UICollectionViewScrollPositionCenteredHorizontally animated:_turning];
+    }
 }
 - (void)moveBy:(NSInteger)delta {
     if (!_plan.groupCount) return; [self recordPosition];
@@ -688,6 +679,7 @@ void MGPresentLibrary(UIWindow *window) {
 - (void)leave { _leaving = YES; [self.navigationController setNavigationBarHidden:NO animated:NO]; [self.navigationController popViewControllerAnimated:YES]; }
 - (void)settingsChanged:(NSNotification *)notification {
     NSString *key = notification.userInfo[@"key"];
+    if (MGIsAppearancePreference(key)) { _counter.textColor = MGTextColor(); MGStyleButton(_retry); [self schedulePlan]; return; }
     if (key && ![@[@"direction", @"pairPages", @"splitSpreads", @"singleCover", @"cropMargins", @"grayscale", @"sharpen", @"lowMemory", @"amoled"] containsObject:key]) return;
     [self recordPosition]; if ([key isEqualToString:@"direction"]) _direction = [[MGSettings shared] direction]; [_provider clearRenderedCache]; [self schedulePlan];
 }

@@ -54,7 +54,7 @@ static NSError *MGCloudError(NSString *message, NSInteger code) {
             NSMutableArray *valid = [NSMutableArray array];
             for (id value in body) {
                 if (![value isKindOfClass:[NSDictionary class]] || ![value[@"id"] isKindOfClass:[NSString class]] ||
-                    ![value[@"name"] isKindOfClass:[NSString class]] || ![@[@"image", @"folder", @"pdf"] containsObject:value[@"type"]]) continue;
+                    ![value[@"name"] isKindOfClass:[NSString class]] || ![@[@"image", @"folder", @"pdf", @"epub", @"audio", @"video", @"document"] containsObject:value[@"type"]]) continue;
                 NSMutableDictionary *item = [value mutableCopy];
                 if (![item[@"resourceKey"] isKindOfClass:[NSString class]]) [item removeObjectForKey:@"resourceKey"];
                 if (![item[@"width"] isKindOfClass:[NSNumber class]]) [item removeObjectForKey:@"width"];
@@ -80,6 +80,9 @@ static NSError *MGCloudError(NSString *message, NSInteger code) {
     NSMutableString *name = [NSMutableString string];
     for (NSUInteger i = 0; i < sizeof(digest); i++) [name appendFormat:@"%02x", digest[i]];
     return [_cacheDirectory URLByAppendingPathComponent:[name stringByAppendingPathExtension:kind]];
+}
+- (NSURL *)mediaURLForFile:(NSString *)fileID resourceKey:(NSString *)resourceKey {
+    return [self URLForPath:@"/api/page" IDKey:@"fileId" ID:fileID resourceKey:resourceKey];
 }
 - (void)trimCacheKeeping:(NSURL *)current {
     NSFileManager *manager = [NSFileManager defaultManager];

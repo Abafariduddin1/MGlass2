@@ -8,3 +8,6 @@ void MGStyleHostController(UIViewController *controller);
 void MGStyleHostListSurface(UIView *view);
 void MGStyleBar(UIView *bar);
 void MGStartGlassObservers(void);
+void MGStyleButton(UIButton *button);
+void MGStyleHostControl(UIView *view);
+void MGConfigureNavigationAppearance(UINavigationController *controller);
