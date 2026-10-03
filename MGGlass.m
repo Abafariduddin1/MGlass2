@@ -37,6 +37,12 @@ static void MGRestoreSurface(UIView *view) {
 
 void MGInstallGlass(UIView *view) {
     if (!view || ![NSThread isMainThread]) return;
+    // UIKit owns a bar's content hierarchy. Style its background through the
+    // appearance API rather than inserting an effect beside its buttons.
+    if ([view isKindOfClass:[UINavigationBar class]] || [view isKindOfClass:[UITabBar class]]) {
+        MGStyleBar(view);
+        return;
+    }
     MGStartGlassObservers();
     [MGGlassRoots addObject:view];
     if (![[MGSettings shared] flag:@"glass"] || UIAccessibilityIsReduceTransparencyEnabled()) {
@@ -44,7 +50,11 @@ void MGInstallGlass(UIView *view) {
     }
     if (objc_getAssociatedObject(view, &MGEffectKey)) return;
     MGRememberColor(view);
-    UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:MGGlassEffect()];
+    // Full-screen surfaces are backdrops. Reserve native glass for small
+    // controls so it cannot composite the screen's content as part of a lens.
+    BOOL smallSurface = [view isKindOfClass:[UIControl class]] || (view.bounds.size.height > 0 && view.bounds.size.height <= 180);
+    UIVisualEffect *effect = smallSurface ? MGGlassEffect() : [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:effect];
     glass.frame = view.bounds;
     glass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     glass.userInteractionEnabled = NO;
@@ -103,7 +113,14 @@ void MGStyleHostController(UIViewController *controller) {
 }
 
 void MGStyleBar(UIView *bar) {
-    if (![NSThread isMainThread]) return;
+    if (!bar || ![NSThread isMainThread]) return;
+    // Manga supplies its own complete navigation/toolbar appearance. Host
+    // hooks must not overwrite it when the modal attaches to the window.
+    Class readerNavigation = NSClassFromString(@"MGNavigationController");
+    UIResponder *owner = bar.nextResponder;
+    for (NSUInteger depth = 0; owner && depth < 24; depth++, owner = owner.nextResponder) {
+        if (readerNavigation && [owner isKindOfClass:readerNavigation]) return;
+    }
     MGStartGlassObservers();
     [MGBars addObject:bar];
     BOOL enabled = [[MGSettings shared] flag:@"glass"] && !UIAccessibilityIsReduceTransparencyEnabled();
@@ -121,6 +138,7 @@ void MGStyleBar(UIView *bar) {
             objc_setAssociatedObject(bar, &MGBarScrollKey, [nav.scrollEdgeAppearance copy] ?: [NSNull null], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             UINavigationBarAppearance *appearance = [nav.standardAppearance copy];
             [appearance configureWithTransparentBackground];
+            appearance.backgroundEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
             appearance.titleTextAttributes = @{NSForegroundColorAttributeName:[UIColor whiteColor]};
             nav.standardAppearance = appearance;
             nav.scrollEdgeAppearance = appearance;
@@ -140,12 +158,12 @@ void MGStyleBar(UIView *bar) {
             if (@available(iOS 15.0, *)) objc_setAssociatedObject(bar, &MGBarScrollKey, [tab.scrollEdgeAppearance copy] ?: [NSNull null], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             UITabBarAppearance *appearance = [tab.standardAppearance copy];
             [appearance configureWithTransparentBackground];
+            appearance.backgroundEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
             tab.standardAppearance = appearance;
             if (@available(iOS 15.0, *)) tab.scrollEdgeAppearance = appearance;
         }
     }
-    if (enabled) MGInstallGlass(bar);
-    else {
+    if (!enabled) {
         MGRestoreSurface(bar);
         objc_setAssociatedObject(bar, &MGBarAppearanceKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(bar, &MGBarScrollKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

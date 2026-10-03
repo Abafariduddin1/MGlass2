@@ -47,6 +47,44 @@ static void MGOpenBookmark(UIViewController *controller, NSDictionary *bookmark)
 }
 
 @implementation MGNavigationController
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    // Do not inherit Spotify's UIAppearance settings for manga controls.
+    UIColor *accent = [UIColor colorWithRed:30.0 / 255 green:215.0 / 255 blue:96.0 / 255 alpha:1];
+    UIBarButtonItemAppearance *buttons = [[UIBarButtonItemAppearance alloc] initWithStyle:UIBarButtonItemStylePlain];
+    buttons.normal.titleTextAttributes = @{NSForegroundColorAttributeName:accent};
+    buttons.highlighted.titleTextAttributes = @{NSForegroundColorAttributeName:accent};
+    buttons.disabled.titleTextAttributes = @{NSForegroundColorAttributeName:[UIColor secondaryLabelColor]};
+    UINavigationBarAppearance *navigation = [UINavigationBarAppearance new];
+    [navigation configureWithOpaqueBackground];
+    navigation.backgroundColor = [UIColor colorWithWhite:.06 alpha:1];
+    navigation.titleTextAttributes = @{NSForegroundColorAttributeName:[UIColor whiteColor]};
+    navigation.largeTitleTextAttributes = navigation.titleTextAttributes;
+    navigation.buttonAppearance = buttons;
+    navigation.doneButtonAppearance = buttons;
+    navigation.backButtonAppearance = buttons;
+    self.navigationBar.standardAppearance = navigation;
+    self.navigationBar.compactAppearance = navigation;
+    self.navigationBar.scrollEdgeAppearance = navigation;
+    self.navigationBar.tintColor = accent;
+    self.navigationBar.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
+    self.navigationBar.translucent = NO;
+    UIToolbarAppearance *toolbar = [UIToolbarAppearance new];
+    [toolbar configureWithOpaqueBackground];
+    toolbar.backgroundColor = navigation.backgroundColor;
+    toolbar.buttonAppearance = buttons;
+    toolbar.doneButtonAppearance = buttons;
+    self.toolbar.standardAppearance = toolbar;
+    self.toolbar.compactAppearance = toolbar;
+    self.toolbar.tintColor = accent;
+    self.toolbar.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
+    self.toolbar.translucent = NO;
+    if (@available(iOS 15.0, *)) {
+        self.navigationBar.compactScrollEdgeAppearance = navigation;
+        self.toolbar.scrollEdgeAppearance = toolbar;
+        self.toolbar.compactScrollEdgeAppearance = toolbar;
+    }
+}
 - (UIViewController *)childViewControllerForStatusBarHidden { return self.topViewController; }
 - (UIViewController *)childViewControllerForStatusBarStyle { return self.topViewController; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.topViewController.supportedInterfaceOrientations; }
