@@ -201,7 +201,7 @@ void MGPresentLibrary(UIWindow *window) {
     return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)path {
-    (void)collectionView; if (_opening || path.item >= self.items.count) return;
+    (void)collectionView; if (_opening || path.item < 0 || (NSUInteger)path.item >= self.items.count) return;
     NSDictionary *item = self.items[path.item]; NSString *type = item[@"type"];
     if ([type isEqualToString:@"pdf"]) {
         MangaPDFViewController *reader = [MangaPDFViewController new]; reader.pdfFileId = item[@"id"]; reader.resourceKey = item[@"resourceKey"]; reader.title = item[@"name"];
@@ -492,7 +492,7 @@ void MGPresentLibrary(UIWindow *window) {
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section { (void)collectionView; (void)section; return _plan.groupCount; }
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)path {
     (void)layout; CGSize size = collectionView.bounds.size;
-    if (_direction == MGVertical && path.item < _plan.groupCount) {
+    if (_direction == MGVertical && path.item >= 0 && (size_t)path.item < _plan.groupCount) {
         MGSegment segment = _segments[_groups[path.item].first]; CGSize source = [_provider sizeAtIndex:segment.source];
         CGFloat ratio = source.width > 0 ? source.height / source.width : 1.45;
         // Tall webtoon images keep their natural height, with a practical upper bound.
