@@ -1,0 +1,41 @@
+name: Build MangaGlass Dylib
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test page planning and cloud proxy
+        run: bash scripts/test.sh
+      - name: Install Theos and select the Xcode iOS SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ldid
+          theos_dir="$RUNNER_TEMP/mangaglass-theos"
+          git clone --depth=1 --recurse-submodules https://github.com/theos/theos.git "$theos_dir"
+          sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          mkdir -p "$theos_dir/sdks"
+          ln -s "$sdk_path" "$theos_dir/sdks/iPhoneOS${sdk_version}.sdk"
+          echo "THEOS=$theos_dir" >> "$GITHUB_ENV"
+          echo "SDKVERSION=$sdk_version" >> "$GITHUB_ENV"
+      - name: Compile and check the actual dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make FINALPACKAGE=1
+          mkdir -p output
+          bash scripts/export-dylib.sh
+      - name: Upload injection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaGlass-Dylib
+          path: output/MangaGlass.dylib
+          if-no-files-found: error
