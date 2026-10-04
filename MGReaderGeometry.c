@@ -79,8 +79,11 @@ MGUnitRect MGContentBounds(const uint8_t *rgba, size_t width, size_t height, siz
         if (y < top) top = y;
         if (y > bottom) bottom = y;
     }
-    // Blank pages and large intentional white areas should stay intact.
-    if (!found || (double)(right - left + 1) / width < .60 || (double)(bottom - top + 1) / height < .60) return full;
+    // A scan can occupy only the centre of an oversized PDF sheet. Keep blank
+    // pages and isolated page numbers intact, but let real centred artwork fit.
+    double contentWidth = found ? (double)(right - left + 1) / width : 0;
+    double contentHeight = found ? (double)(bottom - top + 1) / height : 0;
+    if (!found || contentWidth < .15 || contentHeight < .15 || contentWidth * contentHeight < .08) return full;
     size_t padX = width / 100 + 1, padY = height / 100 + 1;
     left = left > padX ? left - padX : 0;
     top = top > padY ? top - padY : 0;

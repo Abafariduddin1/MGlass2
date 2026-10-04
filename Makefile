@@ -5,7 +5,7 @@ export TARGET_CODESIGN = true
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = MangaGlass
-MangaGlass_FILES = Tweak.x MGSettings.m MGGlass.m MGCloudClient.m MGPageProvider.m MangaViewController.m MGFileViewController.m MGEpubBook.m MGArchive.c MGReaderGeometry.c
+MangaGlass_FILES = Tweak.x MGSettings.m MGColorPicker.m MGGlass.m MGCloudClient.m MGPageProvider.m MangaViewController.m MGFileViewController.m MGEpubBook.m MGArchive.c MGReaderGeometry.c
 MangaGlass_CFLAGS = -Wall -Wextra
 MangaGlass_OBJCFLAGS = -fobjc-arc
 MangaGlass_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore PDFKit ImageIO CoreImage WebKit AVKit AVFoundation CoreMedia QuickLook

@@ -334,7 +334,7 @@ void MGPresentLibrary(UIWindow *window) {
     [self cancelRequests]; NSUInteger generation = _generation;
     _imageCount = segments.count; _rtl = direction == MGRightToLeft; _retry.hidden = YES; [_spinner startAnimating];
     self.backgroundColor = [[MGSettings shared] flag:@"amoled"] ? [UIColor blackColor] : [UIColor colorWithWhite:.075 alpha:1];
-    [self.zoom setZoomScale:1 animated:NO]; for (UIImageView *view in self.images) view.image = nil;
+    [self.zoom setZoomScale:1 animated:NO]; self.zoom.contentOffset = CGPointZero; for (UIImageView *view in self.images) view.image = nil;
     __block NSUInteger remaining = segments.count; __block BOOL failed = NO;
     __weak typeof(self) weakSelf = self;
     for (NSUInteger slot = 0; slot < segments.count; slot++) {
@@ -680,7 +680,7 @@ void MGPresentLibrary(UIWindow *window) {
 - (void)settingsChanged:(NSNotification *)notification {
     NSString *key = notification.userInfo[@"key"];
     if (MGIsAppearancePreference(key)) { _counter.textColor = MGTextColor(); MGStyleButton(_retry); [self schedulePlan]; return; }
-    if (key && ![@[@"direction", @"pairPages", @"splitSpreads", @"singleCover", @"cropMargins", @"grayscale", @"sharpen", @"lowMemory", @"amoled"] containsObject:key]) return;
+    if (key && ![@[@"direction", @"pairPages", @"splitSpreads", @"singleCover", @"adaptiveFit", @"cropMargins", @"grayscale", @"sharpen", @"lowMemory", @"amoled"] containsObject:key]) return;
     [self recordPosition]; if ([key isEqualToString:@"direction"]) _direction = [[MGSettings shared] direction]; [_provider clearRenderedCache]; [self schedulePlan];
 }
 - (void)readerOptions {
@@ -698,7 +698,9 @@ void MGPresentLibrary(UIWindow *window) {
 }
 - (void)toggleNativePDF {
     if (!_provider.document) return; [self recordPosition];
-    if (_nativePDF) { [_nativePDF removeFromSuperview]; _nativePDF = nil; _collectionView.hidden = NO; [self scrollToCurrent:NO]; return; }
+    if (_nativePDF) { [_nativePDF removeFromSuperview]; _nativePDF = nil; _collectionView.hidden = NO; [_collectionView reloadData]; [_collectionView layoutIfNeeded]; [self scrollToCurrent:NO]; return; }
+    for (MGPageRequest *request in _prefetch) [request cancel]; [_prefetch removeAllObjects];
+    for (MGPageCell *cell in _collectionView.visibleCells) [cell cancelRequests];
     _nativePDF = [[PDFView alloc] initWithFrame:_collectionView.frame]; _nativePDF.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _nativePDF.document = _provider.document; _nativePDF.backgroundColor = [UIColor blackColor]; [self.view addSubview:_nativePDF]; _collectionView.hidden = YES;
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(nativeTap:)]; tap.cancelsTouchesInView = NO; tap.delegate = self; [_nativePDF addGestureRecognizer:tap];
@@ -724,8 +726,16 @@ void MGPresentLibrary(UIWindow *window) {
     CGPoint point = preservePoint ? [_nativePDF convertPoint:CGPointMake(_nativePDF.bounds.size.width / 2, 0) toPage:previous] : CGPointZero;
     _nativePDF.frame = _collectionView.frame;
     BOOL pair = _nativePDF.bounds.size.width >= 600 && _nativePDF.bounds.size.width / MAX(1, _nativePDF.bounds.size.height) >= 1.25 && [[MGSettings shared] flag:@"pairPages"] && _direction != MGVertical;
-    _nativePDF.displayMode = _direction == MGVertical ? kPDFDisplaySinglePageContinuous : pair ? kPDFDisplayTwoUp : kPDFDisplaySinglePage;
-    _nativePDF.displayDirection = _direction == MGVertical ? kPDFDisplayDirectionVertical : kPDFDisplayDirectionHorizontal;
+    PDFDisplayDirection direction = _direction == MGVertical ? kPDFDisplayDirectionVertical : kPDFDisplayDirectionHorizontal;
+    BOOL paging = _direction != MGVertical && !pair;
+    if (_nativePDF.displayDirection != direction || _nativePDF.isUsingPageViewController != paging) {
+        [_nativePDF usePageViewController:NO withViewOptions:nil];
+        _nativePDF.displayDirection = direction;
+        [_nativePDF usePageViewController:paging withViewOptions:nil];
+    }
+    // Single-page PDF mode has no inter-page scrolling. Enable native paging for
+    // horizontal reading and continuous scrolling for vertical/two-page reading.
+    _nativePDF.displayMode = pair ? kPDFDisplayTwoUpContinuous : kPDFDisplaySinglePageContinuous;
     _nativePDF.displaysRTL = _direction == MGRightToLeft; _nativePDF.displaysAsBook = [[MGSettings shared] flag:@"singleCover"];
     _nativePDF.autoScales = YES;
     PDFPage *page = [_provider.document pageAtIndex:source];

@@ -1,5 +1,7 @@
 #import "MGSettings.h"
 #import "MGGlass.h"
+#import "MGColorPicker.h"
+#include <math.h>
 
 NSString * const MGSettingsDidChangeNotification = @"com.custom.mangaglass.settingsChanged";
 NSString * const MGBookmarksDidChangeNotification = @"com.custom.mangaglass.bookmarksChanged";
@@ -11,10 +13,10 @@ static NSUserDefaults *MGDefaults(void) {
     dispatch_once(&once, ^{
         defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.custom.mangaglass"];
         [defaults registerDefaults:@{@"direction": @"rtl", @"pairPages": @YES, @"splitSpreads": @YES,
-          @"singleCover": @YES, @"cropMargins": @NO, @"grayscale": @NO, @"sharpen": @NO,
+          @"singleCover": @YES, @"cropMargins": @NO, @"adaptiveFit": @YES, @"grayscale": @NO, @"sharpen": @NO,
           @"lowMemory": @NO, @"amoled": @YES, @"askBookmark": @YES, @"glass": @YES,
           @"floatingFallback": @YES, @"bookmarks": @[], @"theme":@"spotify", @"accentHex":@"1ED760",
-          @"backgroundHex":@"080A0C", @"textHex":@"FFFFFF", @"glassStyle":@"regular", @"glassButtons":@YES,
+          @"backgroundHex":@"000000", @"textHex":@"FFFFFF", @"glassStyle":@"regular", @"glassButtons":@YES,
           @"hostText":@YES, @"roundness":@"20", @"dockPosition":@"besideCreate", @"epubFontSize":@"18", @"epubFont":@"serif"}];
     });
     return defaults;
@@ -85,7 +87,7 @@ static NSDictionary *MGChoice(NSString *key, NSString *title, NSArray *values, N
         @{@"key":@"pairPages", @"title":@"Two pages in landscape"}, @{@"key":@"splitSpreads", @"title":@"Split wide scans in portrait"}, @{@"key":@"singleCover", @"title":@"Keep the first page single"},
         MGChoice(@"epubFontSize", @"EPUB text size", @[@"14", @"16", @"18", @"20", @"22", @"26", @"30", @"32"], @[@"14", @"16", @"18", @"20", @"22", @"26", @"30", @"32"]),
         MGChoice(@"epubFont", @"EPUB font", @[@"serif", @"sans"], @[@"Serif", @"System"])],
-      @[@{@"key":@"cropMargins", @"title":@"Crop white margins"}, @{@"key":@"grayscale", @"title":@"Grayscale manga"}, @{@"key":@"sharpen", @"title":@"Sharpen manga text"}, @{@"key":@"lowMemory", @"title":@"Lower reader memory"}, @{@"key":@"amoled", @"title":@"Pure black manga background"}],
+      @[@{@"key":@"adaptiveFit", @"title":@"Fit PDF artwork in adaptive view"}, @{@"key":@"cropMargins", @"title":@"Crop white image margins"}, @{@"key":@"grayscale", @"title":@"Grayscale manga"}, @{@"key":@"sharpen", @"title":@"Sharpen manga text"}, @{@"key":@"lowMemory", @"title":@"Lower reader memory"}, @{@"key":@"amoled", @"title":@"Pure black manga background"}],
       @[@{@"key":@"askBookmark", @"title":@"Ask to bookmark when leaving"},
         MGChoice(@"dockPosition", @"Manga entry", @[@"besideCreate", @"floating"], @[@"Beside Create", @"Floating button"]),
         @{@"key":@"floatingFallback", @"title":@"Show fallback if dock unavailable"}]];
@@ -108,7 +110,7 @@ static NSDictionary *MGChoice(NSString *key, NSString *title, NSArray *values, N
     NSString *key = row[@"key"], *kind = row[@"kind"];
     if ([kind isEqualToString:@"choice"]) {
         NSString *value = [[MGSettings shared] text:key]; NSUInteger index = [row[@"values"] indexOfObject:value ?: @""]; cell.detailTextLabel.text = index == NSNotFound ? value : row[@"labels"][index]; cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if ([kind isEqualToString:@"color"]) { cell.detailTextLabel.text = [@"#" stringByAppendingString:[[MGSettings shared] text:key]]; cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; }
+    } else if ([kind isEqualToString:@"color"]) { cell.detailTextLabel.text = MGHexForColor([key isEqualToString:@"accentHex"] ? MGAccentColor() : [key isEqualToString:@"backgroundHex"] ? MGBackgroundColor() : MGTextColor()); cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; }
     else if ([kind isEqualToString:@"action"]) { cell.textLabel.textColor = MGAccentColor(); }
     else { UISwitch *toggle = [UISwitch new]; toggle.on = [[MGSettings shared] flag:key]; toggle.onTintColor = MGAccentColor(); toggle.accessibilityIdentifier = key; [toggle addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView = toggle; cell.selectionStyle = UITableViewCellSelectionStyleNone; }
     return cell;
@@ -123,13 +125,7 @@ static NSDictionary *MGChoice(NSString *key, NSString *title, NSArray *values, N
         [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; menu.popoverPresentationController.sourceView = [tableView cellForRowAtIndexPath:path]; menu.popoverPresentationController.sourceRect = [tableView cellForRowAtIndexPath:path].bounds; [self presentViewController:menu animated:YES completion:nil]; return;
     }
     if ([kind isEqualToString:@"color"]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:row[@"title"] message:@"Enter a six-digit hex color, such as 1ED760." preferredStyle:UIAlertControllerStyleAlert];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *field) { field.text = [[MGSettings shared] text:key]; field.autocorrectionType = UITextAutocorrectionTypeNo; }];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            (void)action; NSString *value = [[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] stringByReplacingOccurrencesOfString:@"#" withString:@""];
-            NSMutableDictionary *colors=[@{@"theme":@"custom", @"accentHex":[MGHexForColor(MGAccentColor()) substringFromIndex:1], @"backgroundHex":[MGHexForColor(MGBackgroundColor()) substringFromIndex:1], @"textHex":[MGHexForColor(MGTextColor()) substringFromIndex:1]} mutableCopy]; colors[key]=value.uppercaseString;
-            if (![[MGSettings shared] applyAppearance:colors]) [self invalidTheme];
-        }]]; [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; [self presentViewController:alert animated:YES completion:nil]; return;
+        [self.navigationController pushViewController:[[MGColorPickerViewController alloc] initWithPreference:key title:row[@"title"]] animated:YES]; return;
     }
     if ([key isEqualToString:@"copyTheme"]) {
         NSData *data = [NSJSONSerialization dataWithJSONObject:[[MGSettings shared] appearance] options:NSJSONWritingPrettyPrinted error:nil]; UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]; UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"Theme copied");
@@ -149,7 +145,7 @@ static UIColor *MGColorFromHex(NSString *hex) {
 static NSString *MGThemeValue(NSString *key) {
     MGSettings *settings = [MGSettings shared]; NSString *theme = [settings text:@"theme"];
     NSDictionary *themes = @{
-      @"spotify":@{@"accentHex":@"1ED760", @"backgroundHex":@"080A0C", @"textHex":@"FFFFFF"},
+      @"spotify":@{@"accentHex":@"1ED760", @"backgroundHex":@"000000", @"textHex":@"FFFFFF"},
       @"midnight":@{@"accentHex":@"AB9DFF", @"backgroundHex":@"0C0A16", @"textHex":@"F4F1FF"},
       @"ocean":@{@"accentHex":@"63DCEB", @"backgroundHex":@"07151E", @"textHex":@"EFFBFF"},
       @"rose":@{@"accentHex":@"FFA0BC", @"backgroundHex":@"1C0B15", @"textHex":@"FFF2F7"},
@@ -167,7 +163,7 @@ UIColor *MGTextColor(void) { return MGPalette()[@"textHex"]; }
 UIColor *MGSurfaceColor(void) { return [MGTextColor() colorWithAlphaComponent:.07]; }
 NSString *MGHexForColor(UIColor *color) {
     CGFloat red = 1, green = 1, blue = 1; [color getRed:&red green:&green blue:&blue alpha:NULL];
-    return [NSString stringWithFormat:@"#%02X%02X%02X", (unsigned int)(red * 255), (unsigned int)(green * 255), (unsigned int)(blue * 255)];
+    return [NSString stringWithFormat:@"#%02X%02X%02X", (unsigned int)lround(red * 255), (unsigned int)lround(green * 255), (unsigned int)lround(blue * 255)];
 }
 BOOL MGIsAppearancePreference(NSString *key) { return !key || [@[@"theme", @"accentHex", @"backgroundHex", @"textHex", @"glass", @"glassStyle", @"glassButtons", @"hostText", @"roundness"] containsObject:key]; }
 

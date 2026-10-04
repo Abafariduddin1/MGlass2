@@ -17,7 +17,10 @@ int main(int argc, char **argv) {
         book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:@"nonlinear.epub"] error:NULL]; require(book.chapters.count==1,@"Nonlinear spine items omitted");
         book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:@"encoded-space.epub"] error:NULL]; require([book.chapters.lastObject.lastPathComponent isEqualToString:@"chapter one.xhtml"],@"Encoded resource path");
         book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:@"font-obfuscation.epub"] error:NULL]; require(book!=nil,@"Obfuscated fonts permit system-font reading");
-        for (NSString *name in @[@"missing",@"outside",@"remote",@"drm"]) { error=nil; book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:[name stringByAppendingPathExtension:@"epub"]] error:&error]; require(!book && error!=nil,[name stringByAppendingString:@" produces a visible error"]); }
+        for (NSString *name in @[@"raw-space",@"unicode",@"nested",@"package-space",@"package-percent",@"mime-whitespace",@"generic-media",@"missing-media"]) {
+            error=nil; book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:[name stringByAppendingPathExtension:@"epub"]] error:&error]; require(book && !error && book.chapters.count==2,[name stringByAppendingString:@" opens both chapters"]);
+        }
+        for (NSString *name in @[@"missing",@"missing-item",@"outside",@"encoded-outside",@"remote",@"drm",@"bad-xml"]) { error=nil; book=[MGEpubBook openURL:[directory URLByAppendingPathComponent:[name stringByAppendingPathExtension:@"epub"]] error:&error]; require(!book && error!=nil,[name stringByAppendingString:@" produces a visible error"]); }
         puts("Native EPUB package checks passed.");
     }
     return 0;

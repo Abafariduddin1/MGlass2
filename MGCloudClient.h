@@ -4,6 +4,7 @@
 @interface MGCloudClient : NSObject
 + (instancetype)shared;
 - (NSURL *)mediaURLForFile:(NSString *)fileID resourceKey:(NSString *)resourceKey;
+- (void)discardDownloadedFile:(NSURL *)file completion:(void (^)(void))completion;
 - (NSURLSessionDataTask *)listFolder:(NSString *)folderID resourceKey:(NSString *)resourceKey
                          completion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion;
 - (NSURLSessionDownloadTask *)downloadFile:(NSString *)fileID resourceKey:(NSString *)resourceKey

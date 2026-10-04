@@ -84,6 +84,13 @@ static NSError *MGCloudError(NSString *message, NSInteger code) {
 - (NSURL *)mediaURLForFile:(NSString *)fileID resourceKey:(NSString *)resourceKey {
     return [self URLForPath:@"/api/page" IDKey:@"fileId" ID:fileID resourceKey:resourceKey];
 }
+- (void)discardDownloadedFile:(NSURL *)file completion:(void (^)(void))completion {
+    dispatch_async(_fileQueue, ^{
+        NSString *prefix=[self->_cacheDirectory.path.stringByStandardizingPath stringByAppendingString:@"/"];
+        if (file.isFileURL && [file.path.stringByStandardizingPath hasPrefix:prefix]) [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(); });
+    });
+}
 - (void)trimCacheKeeping:(NSURL *)current {
     NSFileManager *manager = [NSFileManager defaultManager];
     NSArray *files = [manager contentsOfDirectoryAtURL:_cacheDirectory includingPropertiesForKeys:@[NSURLFileSizeKey, NSURLContentModificationDateKey] options:NSDirectoryEnumerationSkipsHiddenFiles error:nil];
@@ -115,6 +122,7 @@ static NSError *MGCloudError(NSString *message, NSInteger code) {
     NSURLSessionDownloadTask *task = [_session downloadTaskWithURL:url completionHandler:^(NSURL *temporary, NSURLResponse *response, NSError *error) {
         NSInteger status = [(NSHTTPURLResponse *)response statusCode];
         if (!error && (status < 200 || status >= 300)) error = MGCloudError(@"This page could not be downloaded. Check your connection and Drive sharing, then retry.", status);
+        if (!error && status == 206) error = MGCloudError(@"The server returned only part of this file. Retry the download.", status);
         NSURL *result = nil;
         // NSURLSession removes the temporary URL when this callback returns.
         // Move synchronously on our file queue, never on the UI thread.

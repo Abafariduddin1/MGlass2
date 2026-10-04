@@ -55,6 +55,20 @@ int main(void) {
     bounds = MGContentBounds(bitmap, 100, 100, 400); assert(fabs(bounds.x - .08) < .001 && fabs(bounds.width - .84) < .001); PASS();
     memset(bitmap, 0, sizeof(bitmap)); bounds = MGContentBounds(bitmap, 100, 100, 400); assert(bounds.width == 1); PASS();
     assert(MGContentBounds(bitmap, 100, 100, 1).width == 1); PASS();
+    // Regression: artwork centred on an oversized PDF sheet must fill the reader,
+    // while blank pages and a tiny page number must not be enlarged as artwork.
+    memset(bitmap, 255, sizeof(bitmap));
+    for (size_t y = 20; y < 65; y++) for (size_t x = 30; x < 70; x++) {
+        size_t index = (y * 100 + x) * 4; bitmap[index] = bitmap[index + 1] = bitmap[index + 2] = 0;
+    }
+    bounds = MGContentBounds(bitmap, 100, 100, 400);
+    assert(fabs(bounds.x - .28) < .001 && fabs(bounds.y - .18) < .001 && fabs(bounds.width - .44) < .001 && fabs(bounds.height - .49) < .001); PASS();
+    memset(bitmap, 255, sizeof(bitmap));
+    for (size_t y = 92; y < 96; y++) for (size_t x = 49; x < 51; x++) {
+        size_t index = (y * 100 + x) * 4; bitmap[index] = bitmap[index + 1] = bitmap[index + 2] = 0;
+    }
+    bounds = MGContentBounds(bitmap, 100, 100, 400);
+    assert(bounds.x == 0 && bounds.y == 0 && bounds.width == 1 && bounds.height == 1); PASS();
     // Property checks: mixed unknown/single/spread pages, viewport sizes and preferences.
     srand(143);
     for (unsigned iteration = 0; iteration < 5000; iteration++) {

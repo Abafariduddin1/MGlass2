@@ -6,11 +6,11 @@ import zipfile
 
 root = Path(sys.argv[1]); root.mkdir(parents=True, exist_ok=True)
 container = '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
-def book(name, package, entries=None):
+def book(name, package, entries=None, package_path="EPUB/book.opf", mime_text="application/epub+zip"):
     with zipfile.ZipFile(root / (name + ".epub"), "w", compression=zipfile.ZIP_DEFLATED) as output:
-        output.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
-        output.writestr("META-INF/container.xml", container)
-        output.writestr("EPUB/book.opf", package)
+        output.writestr("mimetype", mime_text, compress_type=zipfile.ZIP_STORED)
+        output.writestr("META-INF/container.xml", container.replace("EPUB/book.opf", package_path))
+        output.writestr(package_path, package)
         output.writestr("EPUB/one.xhtml", '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body>Hello</body></html>')
         output.writestr("EPUB/two.xhtml", '<html xmlns="http://www.w3.org/1999/xhtml"><body>Two</body></html>')
         for path, content in (entries or {}).items(): output.writestr(path, content)
@@ -25,3 +25,14 @@ book("remote", package.replace('href="one.xhtml"', 'href="https://example.invali
 book("drm", package, {"META-INF/encryption.xml": '<encryption xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/></enc:EncryptedData></encryption>'})
 book("font-obfuscation", package, {"META-INF/encryption.xml": '<encryption xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/></enc:EncryptedData></encryption>'})
 book("encoded-space", package.replace('href="one.xhtml"', 'href="chapter%20one.xhtml"'), {"EPUB/chapter one.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>'})
+book("raw-space", package.replace('href="one.xhtml"', 'href="chapter one.xhtml"'), {"EPUB/chapter one.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>'})
+book("unicode", package.replace('href="one.xhtml"', 'href="章 一.xhtml"'), {"EPUB/章 一.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>'})
+book("nested", package.replace('href="one.xhtml"', 'href="Text/chapter.xhtml"'), {"EPUB/Text/chapter.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body>One</body></html>'})
+book("package-space", package, package_path="EPUB/My book.opf")
+book("package-percent", package, package_path="EPUB/100% Book.opf")
+book("mime-whitespace", package, mime_text="\ufeffapplication/epub+zip\r\n")
+book("generic-media", package.replace('id="one" href="one.xhtml" media-type="application/xhtml+xml"', 'id="one" href="one.xhtml" media-type="application/xml"'))
+book("missing-media", package.replace('id="one" href="one.xhtml" media-type="application/xhtml+xml"', 'id="one" href="one.xhtml"'))
+book("encoded-outside", package.replace('href="one.xhtml"', 'href="%2e%2e/%2e%2e/outside.xhtml"'))
+book("bad-xml", package.replace("</spine>", "</bad>"))
+book("missing-item", package.replace('idref="one"', 'idref="absent"'))

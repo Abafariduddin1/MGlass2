@@ -3,7 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-static char MGStateKey, MGEffectKey, MGBarKey, MGStyledKey, MGButtonBudgetKey;
+static char MGStateKey, MGEffectKey, MGBarKey, MGStyledKey;
 static NSHashTable<UIView *> *MGViews, *MGRoots, *MGBars;
 static NSHashTable<UIViewController *> *MGControllers;
 static NSUInteger MGThemeGeneration = 1;
@@ -11,6 +11,8 @@ static NSUInteger MGThemeGeneration = 1;
 @property (nonatomic, strong) UIColor *background, *tint, *text, *border;
 @property (nonatomic) CGFloat radius, borderWidth;
 @property (nonatomic, strong) id configuration;
+@property (nonatomic) BOOL ownsButtonConfiguration;
+@property (nonatomic) BOOL hostBackgroundConfiguration;
 @property (nonatomic) NSUInteger generation;
 @end
 @implementation MGVisualState
@@ -35,7 +37,6 @@ static MGVisualState *MGRemember(UIView *view) {
         state=[MGVisualState new]; state.background=view.backgroundColor; state.tint=view.tintColor; state.radius=view.layer.cornerRadius; state.borderWidth=view.layer.borderWidth;
         if (view.layer.borderColor) state.border=[UIColor colorWithCGColor:view.layer.borderColor];
         if ([view isKindOfClass:[UILabel class]]) state.text=((UILabel *)view).textColor;
-        if (@available(iOS 15.0,*)) if ([view isKindOfClass:[UIButton class]]) state.configuration=[((UIButton *)view).configuration copy];
         objc_setAssociatedObject(view,&MGStateKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC); [MGViews addObject:view];
     }
     return state;
@@ -45,7 +46,7 @@ static void MGRestore(UIView *view) {
     MGVisualState *state=objc_getAssociatedObject(view,&MGStateKey); if (!state) return;
     view.backgroundColor=state.background; view.tintColor=state.tint; view.layer.cornerRadius=state.radius; view.layer.borderWidth=state.borderWidth; view.layer.borderColor=state.border.CGColor;
     if ([view isKindOfClass:[UILabel class]]) ((UILabel *)view).textColor=state.text;
-    if (@available(iOS 15.0,*)) if ([view isKindOfClass:[UIButton class]]) ((UIButton *)view).configuration=state.configuration;
+    if (@available(iOS 15.0,*)) if ((state.ownsButtonConfiguration || state.hostBackgroundConfiguration) && [view isKindOfClass:[UIButton class]]) ((UIButton *)view).configuration=state.configuration;
     state.generation=0;
 }
 void MGInstallGlass(UIView *view) {
@@ -68,15 +69,22 @@ void MGInstallGlass(UIView *view) {
 void MGStyleButton(UIButton *button) {
     if (!button || !NSThread.isMainThread) return;
     MGVisualState *state=MGRemember(button); if (state.generation==MGThemeGeneration) return;
+    if (@available(iOS 15.0,*)) if (!state.ownsButtonConfiguration) { state.configuration=[button.configuration copy]; state.ownsButtonConfiguration=YES; }
     BOOL glass=MGGlassEnabled() && [[MGSettings shared] flag:@"glassButtons"]; button.tintColor=MGAccentColor();
     if (glass) {
         if (@available(iOS 15.0,*)) {
             UIButtonConfiguration *original=state.configuration, *configuration=nil;
             if (@available(iOS 26.0,*)) {
-                SEL factory=NSSelectorFromString([[[MGSettings shared] text:@"glassStyle"] isEqualToString:@"clear"] ? @"clearGlassButtonConfiguration" : @"glassButtonConfiguration");
+                // Clear glass keeps icon controls from becoming opaque grey tiles.
+                SEL factory=NSSelectorFromString(@"clearGlassButtonConfiguration");
                 if ([UIButtonConfiguration respondsToSelector:factory]) configuration=((id (*)(id,SEL))objc_msgSend)([UIButtonConfiguration class],factory);
             }
-            if (!configuration) configuration=[UIButtonConfiguration grayButtonConfiguration];
+            if (!configuration) {
+                configuration=[UIButtonConfiguration plainButtonConfiguration];
+                configuration.background=[UIBackgroundConfiguration clearConfiguration];
+                configuration.background.strokeColor=[MGTextColor() colorWithAlphaComponent:.12];
+                configuration.background.strokeWidth=.5;
+            }
             configuration.title=original.title ?: button.currentTitle; configuration.subtitle=original.subtitle; configuration.image=original.image ?: button.currentImage; configuration.attributedTitle=original.attributedTitle;
             configuration.baseForegroundColor=MGAccentColor(); configuration.imagePadding=original ? original.imagePadding : 6;
             configuration.imagePlacement=original ? original.imagePlacement : NSDirectionalRectEdgeLeading;
@@ -84,10 +92,10 @@ void MGStyleButton(UIButton *button) {
             configuration.titleTextAttributesTransformer=original.titleTextAttributesTransformer; configuration.buttonSize=original ? original.buttonSize : UIButtonConfigurationSizeMedium;
             configuration.background.cornerRadius=[[MGSettings shared] number:@"roundness"];
             configuration.cornerStyle=[[MGSettings shared] number:@"roundness"]>=28 ? UIButtonConfigurationCornerStyleCapsule : UIButtonConfigurationCornerStyleFixed;
-            if (@available(iOS 26.0,*)) { } else configuration.background.backgroundColor=[MGBackgroundColor() colorWithAlphaComponent:.45];
             button.configuration=configuration;
+            button.backgroundColor=UIColor.clearColor;
         } else {
-            button.backgroundColor=[MGBackgroundColor() colorWithAlphaComponent:.6]; button.layer.cornerRadius=[[MGSettings shared] number:@"roundness"]; button.layer.borderColor=[MGTextColor() colorWithAlphaComponent:.18].CGColor; button.layer.borderWidth=.5;
+            button.backgroundColor=UIColor.clearColor; button.layer.cornerRadius=[[MGSettings shared] number:@"roundness"]; button.layer.borderColor=[MGTextColor() colorWithAlphaComponent:.12].CGColor; button.layer.borderWidth=.5;
         }
     } else {
         if (@available(iOS 15.0,*)) button.configuration=state.configuration;
@@ -105,35 +113,58 @@ static UIViewController *MGHostOwner(UIView *view) {
     for (NSUInteger depth=0; owner && depth<24; depth++,owner=owner.nextResponder) if ([owner isKindOfClass:[UIViewController class]]) return MGSpotifyController((UIViewController *)owner) ? (UIViewController *)owner : nil;
     return nil;
 }
-static BOOL MGHostView(UIView *view) { return MGHostOwner(view)!=nil; }
-static BOOL MGInReusedCell(UIView *view) {
-    for (NSUInteger depth=0; view && depth<18; depth++,view=view.superview) if ([view isKindOfClass:[UITableViewCell class]] || [view isKindOfClass:[UICollectionViewCell class]]) return YES;
+static BOOL MGProtectedChrome(UIView *view) {
+    for (NSUInteger depth=0; view && depth<24; depth++,view=view.superview) {
+        NSString *name=NSStringFromClass(view.class).lowercaseString;
+        if ([view isKindOfClass:[UINavigationBar class]] || [view isKindOfClass:[UITabBar class]] || [view isKindOfClass:[UIToolbar class]] || [view isKindOfClass:[UIVisualEffectView class]] || [name containsString:@"tabbar"] || [name containsString:@"bottomnavigation"] || [name hasPrefix:@"mg"]) return YES;
+    }
     return NO;
 }
+static BOOL MGHostView(UIView *view) { return !MGProtectedChrome(view) && MGHostOwner(view)!=nil; }
 static void MGSoftenSurface(UIView *view) {
     UIColor *original=((MGVisualState *)objc_getAssociatedObject(view,&MGStateKey)).background ?: view.backgroundColor;
     CGFloat r=0,g=0,b=0,a=0; if (![original getRed:&r green:&g blue:&b alpha:&a] || a<.8 || MAX(r,MAX(g,b))-MIN(r,MIN(g,b))>.09) return;
-    MGRemember(view); view.backgroundColor=[view isKindOfClass:[UIScrollView class]] ? UIColor.clearColor : MGSurfaceColor();
+    MGRemember(view); view.backgroundColor=UIColor.clearColor;
 }
 void MGStyleHostControl(UIView *view) {
-    if (!view.window || !NSThread.isMainThread || !MGHostView(view)) return;
-    if ([view isKindOfClass:[UIButton class]] && view.bounds.size.width>=28 && view.bounds.size.height>=28) {
-        if (MGInReusedCell(view)) { MGRemember(view); view.tintColor=MGAccentColor(); }
-        else {
-            UIViewController *owner=MGHostOwner(view); NSHashTable *buttons=objc_getAssociatedObject(owner,&MGButtonBudgetKey);
-            if (!buttons) { buttons=[NSHashTable weakObjectsHashTable]; objc_setAssociatedObject(owner,&MGButtonBudgetKey,buttons,OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
-            if ([buttons containsObject:view] || buttons.count<12) { [buttons addObject:view]; MGStyleButton((UIButton *)view); }
-            else { MGRemember(view); view.tintColor=MGAccentColor(); }
+    if (!NSThread.isMainThread || !view.window || !MGHostView(view)) return;
+    if ([view isKindOfClass:[UIButton class]]) {
+        // Spotify subclasses own their images, state handlers and configurations.
+        // Replacing those with Apple's generic configuration erases custom content.
+        MGVisualState *state=MGRemember(view); view.tintColor=MGAccentColor(); MGSoftenSurface(view);
+        if (@available(iOS 15.0,*)) {
+            UIButton *button=(id)view; UIButtonConfiguration *original=button.configuration;
+            UIColor *fill=original.background.backgroundColor ?: original.baseBackgroundColor;
+            CGFloat red=0,green=0,blue=0,alpha=0;
+            if (state.generation!=MGThemeGeneration && original && MGGlassEnabled() && [[MGSettings shared] flag:@"glassButtons"] && [fill getRed:&red green:&green blue:&blue alpha:&alpha] && alpha>.1 && MAX(red,MAX(green,blue))-MIN(red,MIN(green,blue))<.09) {
+                if (!state.hostBackgroundConfiguration) { state.configuration=[original copy]; state.hostBackgroundConfiguration=YES; }
+                // Only an explicit neutral fill is cleared. Keep the existing
+                // title, image, transformers, insets and Spotify update handler.
+                UIButtonConfiguration *configuration=[original copy]; configuration.baseBackgroundColor=UIColor.clearColor; configuration.background.backgroundColor=UIColor.clearColor; configuration.background.visualEffect=nil;
+                UIColor *foreground=original.baseForegroundColor;
+                if ([foreground getRed:&red green:&green blue:&blue alpha:&alpha] && MAX(red,MAX(green,blue))-MIN(red,MIN(green,blue))<.09) configuration.baseForegroundColor=[MGTextColor() colorWithAlphaComponent:alpha];
+                button.configuration=configuration; state.generation=MGThemeGeneration;
+            }
+        }
+        NSMutableArray *backgrounds=[view.subviews mutableCopy];
+        for (NSUInteger i=0; i<backgrounds.count && i<12; i++) {
+            UIView *child=backgrounds[i]; NSString *name=NSStringFromClass(child.class);
+            if ([name hasPrefix:@"_"] || [child isKindOfClass:[UILabel class]] || [child isKindOfClass:[UIImageView class]] || [child isKindOfClass:[UIVisualEffectView class]] || [child isKindOfClass:[UIControl class]]) continue;
+            MGSoftenSurface(child); if (backgrounds.count<12) [backgrounds addObjectsFromArray:child.subviews];
         }
     }
     if ([view isKindOfClass:[UILabel class]] && [[MGSettings shared] flag:@"hostText"]) {
+        UIView *ancestor=view.superview;
+        for (NSUInteger depth=0; ancestor && depth<16; depth++,ancestor=ancestor.superview) {
+            if (@available(iOS 15.0,*)) if ([ancestor isKindOfClass:[UIButton class]] && ((UIButton *)ancestor).configuration) return;
+        }
         UILabel *label=(id)view; UIColor *original=((MGVisualState *)objc_getAssociatedObject(view,&MGStateKey)).text ?: label.textColor;
         CGFloat r=0,g=0,b=0,a=0;
         if ([original getRed:&r green:&g blue:&b alpha:&a] && MAX(r,MAX(g,b))-MIN(r,MIN(g,b))<.08) { MGRemember(view); label.textColor=[MGTextColor() colorWithAlphaComponent:a*(MAX(r,MAX(g,b))<.65 ? .7 : 1)]; }
     }
 }
 void MGStyleHostListSurface(UIView *view) {
-    if (!view.window || !NSThread.isMainThread || !MGHostView(view)) return; MGSoftenSurface(view);
+    if (!NSThread.isMainThread || !view.window || !MGHostView(view)) return; MGSoftenSurface(view);
     UIView *content=[view isKindOfClass:[UITableViewCell class]] ? ((UITableViewCell *)view).contentView : [view isKindOfClass:[UICollectionViewCell class]] ? ((UICollectionViewCell *)view).contentView : nil;
     if (!content) return; MGSoftenSurface(content); NSMutableArray *queue=[content.subviews mutableCopy];
     for (NSUInteger i=0; i<queue.count && i<24; i++) { UIView *child=queue[i]; if ([child isKindOfClass:[UILabel class]]) MGStyleHostControl(child); if (![child isKindOfClass:[UIControl class]] && ![child isKindOfClass:[UIImageView class]] && queue.count<24) [queue addObjectsFromArray:child.subviews]; }
@@ -141,13 +172,15 @@ void MGStyleHostListSurface(UIView *view) {
 void MGStyleHostController(UIViewController *controller) {
     if (!MGSpotifyController(controller) || !NSThread.isMainThread) return; MGStartGlassObservers(); [MGControllers addObject:controller];
     if ([objc_getAssociatedObject(controller,&MGStyledKey) unsignedIntegerValue]==MGThemeGeneration) return;
-    objc_setAssociatedObject(controller,&MGStyledKey,@(MGThemeGeneration),OBJC_ASSOCIATION_RETAIN_NONATOMIC); MGInstallGlass(controller.view);
-    NSMutableArray *queue=[controller.view.subviews mutableCopy]; NSUInteger buttons=0;
+    objc_setAssociatedObject(controller,&MGStyledKey,@(MGThemeGeneration),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UIView *root=controller.view;
+    if (!MGProtectedChrome(root) && root.bounds.size.width>=root.window.bounds.size.width*.6 && root.bounds.size.height>=root.window.bounds.size.height*.45) { MGRemember(root); [MGRoots addObject:root]; root.backgroundColor=MGBackgroundColor(); }
+    NSMutableArray *queue=[root.subviews mutableCopy];
     for (NSUInteger i=0; i<queue.count && i<280; i++) {
         UIView *view=queue[i]; if (view.hidden || view.alpha<.01) continue;
         if ([view isKindOfClass:[UINavigationBar class]] || [view isKindOfClass:[UITabBar class]] || [view isKindOfClass:[UIToolbar class]]) { MGStyleBar(view); continue; }
-        if ([view isKindOfClass:[UIVisualEffectView class]] || [view isKindOfClass:[UIImageView class]]) continue;
-        if ([view isKindOfClass:[UIButton class]]) { CGRect rect=[view convertRect:view.bounds toView:controller.view]; if (buttons<12 && CGRectIntersectsRect(rect,controller.view.bounds)) { MGStyleHostControl(view); buttons++; } continue; }
+        if (MGProtectedChrome(view) || [view isKindOfClass:[UIImageView class]]) continue;
+        if ([view isKindOfClass:[UIButton class]]) { MGStyleHostControl(view); continue; }
         if ([view isKindOfClass:[UILabel class]]) { MGStyleHostControl(view); continue; }
         MGSoftenSurface(view); if (queue.count<380) [queue addObjectsFromArray:view.subviews];
     }
@@ -202,7 +235,7 @@ void MGConfigureNavigationAppearance(UINavigationController *controller) { contr
     for (UIView *bar in MGBars.allObjects) { MGRestoreBar(bar); MGStyleBar(bar); }
     for (UIView *root in MGRoots.allObjects) if (root.window) MGInstallGlass(root);
     for (UIViewController *controller in MGControllers.allObjects) if (controller.view.window) MGStyleHostController(controller);
-    for (UIView *view in MGViews.allObjects) if (view.window && [view isKindOfClass:[UIButton class]]) { if (MGHostView(view)) MGStyleHostControl(view); else MGStyleButton((UIButton *)view); }
+    for (UIView *view in MGViews.allObjects) if (view.window && [view isKindOfClass:[UIButton class]]) { MGVisualState *state=objc_getAssociatedObject(view,&MGStateKey); if (state.ownsButtonConfiguration) MGStyleButton((UIButton *)view); else MGStyleHostControl(view); }
 }
 @end
 void MGStartGlassObservers(void) {

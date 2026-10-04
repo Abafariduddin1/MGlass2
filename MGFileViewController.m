@@ -24,6 +24,10 @@
 @end
 
 static char MGMediaStatusContext;
+static dispatch_queue_t MGEpubOpenQueue(void) {
+    static dispatch_queue_t queue; static dispatch_once_t once;
+    dispatch_once(&once, ^{ queue=dispatch_queue_create("com.custom.mangaglass.epub",DISPATCH_QUEUE_SERIAL); }); return queue;
+}
 @interface MGPreviewDocument : NSObject <QLPreviewItem>
 @property (nonatomic, strong) NSURL *previewItemURL;
 @property (nonatomic, strong) NSString *previewItemTitle;
@@ -99,11 +103,19 @@ static char MGMediaStatusContext;
         typeof(self) owner = weakSelf; if (!owner || owner->_generation != generation) return;
         if (error) { [owner showFailure:error.localizedDescription]; return; }
         if ([type isEqualToString:@"epub"]) {
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            dispatch_async(MGEpubOpenQueue(), ^{
+                if (!weakSelf) return;
                 NSError *failure = nil; MGEpubBook *book = [MGEpubBook openURL:file error:&failure];
                 dispatch_async(dispatch_get_main_queue(), ^{
                     typeof(self) reader = weakSelf; if (!reader || reader->_generation != generation) return;
-                    if (!book) { [reader showFailure:failure.localizedDescription]; return; }
+                    if (!book) {
+                        // Retry must fetch the file again, rather than repeatedly
+                        // reopening a damaged/stale book from the 24-hour cache.
+                        [[MGCloudClient shared] discardDownloadedFile:file completion:^{
+                            typeof(self) retryReader=weakSelf;
+                            if (retryReader && retryReader->_generation==generation) [retryReader showFailure:failure.localizedDescription];
+                        }]; return;
+                    }
                     reader->_book = book; [reader openEPUB];
                 });
             });
@@ -196,11 +208,13 @@ static char MGMediaStatusContext;
 - (void)webView:(WKWebView *)web didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error { [self webView:web didFailNavigation:navigation withError:error]; }
 - (void)webView:(WKWebView *)web decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))handler {
     (void)web; NSURL *url = action.request.URL;
-    BOOL local = url.isFileURL && [url.URLByStandardizingPath.path hasPrefix:[_book.directory.path stringByAppendingString:@"/"]];
+    NSString *root=_book.directory.URLByResolvingSymlinksInPath.URLByStandardizingPath.path;
+    NSString *path=url.URLByResolvingSymlinksInPath.URLByStandardizingPath.path;
+    BOOL local = url.isFileURL && root.length && [path hasPrefix:[root stringByAppendingString:@"/"]];
     if (!local) { handler(WKNavigationActionPolicyCancel); return; }
     if (action.navigationType == WKNavigationTypeLinkActivated) {
         _pendingOffset = NO;
-        for (NSUInteger i = 0; i < _book.chapters.count; i++) if ([_book.chapters[i].path isEqualToString:url.path]) { _chapter = i; _counter.text = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)i + 1, (unsigned long)_book.chapters.count]; [_counter sizeToFit]; break; }
+        for (NSUInteger i = 0; i < _book.chapters.count; i++) if ([_book.chapters[i].URLByResolvingSymlinksInPath.URLByStandardizingPath.path isEqualToString:path]) { _chapter = i; _counter.text = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)i + 1, (unsigned long)_book.chapters.count]; [_counter sizeToFit]; break; }
         self.toolbarItems.firstObject.enabled = _chapter > 0; self.toolbarItems.lastObject.enabled = _chapter + 1 < _book.chapters.count;
     }
     handler(WKNavigationActionPolicyAllow);
